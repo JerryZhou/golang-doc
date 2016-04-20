@@ -61,6 +61,7 @@ Understanding project structure
 
 ## 深入Go的语法看看
 现在我们详解前面编译流程里面的第二步。[go.y][3] 这个文件包含李golang的语义设计规则，是我们学习go的编译器并且深入理解golang语法规则的一个很好的入手点。这个文件由一系列如下的声明组成：
+
 	xfndcl:
 		LFUNC fndcl fnbody
 	fndcl:
@@ -68,13 +69,18 @@ Understanding project structure
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
 
 上面的代码段声明了两个节点xfndcl和fndcl的定义。fundcl这个节点可以有两种表现形式，第一种形式对应如下的一个构造函数：
+
 	somefunction(x int, y int) int
+
 第二种形式对应到如下的形式：
+
 	(t *SomeType) somefunction(x int, y int) int
+
 xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组成。
 
 [Bison][2]或者[Yacc][5]语法解析器一个重要的特性就是允许放置一段C代码在节点的声明后面，这一小段C代码会每次在找到源文件里面匹配的代码块的时候执行，在执行的代码块里面可以通过$$引用result节点, 用$1、$2、$3... 引用子节点。
 我们用一个例子(从g.y里面截取的一个简化版的节点配置)来理解我们这里提到的解析器怎么插入代码：
+
 	fndcl:
       	sym '(' oarg_type_list_ocomma ')' fnres
         {
@@ -88,6 +94,7 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
           declare($$->nname, PFUNC);
       	}
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
+
 首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后攒国家一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。
  
 - - -
