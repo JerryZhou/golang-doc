@@ -10,7 +10,7 @@
 
 ## 开始装逼
 
-开始接触一门编程语言，我们通常会接触到很多书籍专注在语言的语法、语义甚至标准库等相关方面。但是你很难从这些书籍中去了解关于语言的内存对象模型，以及内置函数调用的时候到底编译器生成了什么样的中间代码(汇编代码或者类汇编代码)。当然对于一个开源的编程语言，你想要了解的这些相对深入的语言机制都可以从源代码里面获取到，回过头来以个人经验来说，要想从源代码理解到这些内容也是相当困难的。
+开始接触一门编程语言，我们通常会接触到很多书籍专注在语言的语法、语义甚至标准库等相关方面。但是你很难从这些书籍中去了解关于语言的内存对象模型，以及内置函数调用的时候到底编译器生成了什么样的中间代码(汇编代码或者类汇编代码)。当然对于一个开源的编程语言，你想要了解的这些相对深入的语言机制都可以从源代码里面获取到，回过头来以个人经验来说，要想从源代码理解到这些内容却也是相当困难的，所以我们这里写一个引子，和大家一起从源代码里面窥探一下golang的胴体(咔擦。。。)。
 
 在开始真正代码之旅之前，我们需要先git一份源代码：
 
@@ -18,10 +18,12 @@
 
 _注意:主干代码持续在变更，我们这里为了保持文章的一致性我们选用go1.4发布分支的代码作为本系列文章的参照_
 
+- - -
+
 ## 工程结构
 Understanding project structure
 
-从Go的仓库src目录下，我们会看到很多子目录。大部分子目录都是Go标准库的代码。标准库里面的每个子目录的里面代码的宝名和目录名保持一致，这也是go的标准命名规则。除开这部分标准库，还有一些目录，其中重要的目录有如下几个:
+从Go的仓库src目录下，我们会看到很多子目录。大部分子目录都是Go标准库的代码。标准库里面的每个子目录的里面代码的包名和目录名保持一致，这也是go的标准命名规则。除开这部分标准库，还有一些目录，其中重要的目录有如下几个:
 
 |目录|描述|
 |-----|----|
@@ -34,6 +36,8 @@ Understanding project structure
 |/src/lib9,/src/libio,/src/liblink| 这些是编译器，链接器以及Go运行时用到的一些库|
 |/src/runtime/| 最重要的Go包，会包含进所有的Go程序里面，这是整个Go的运行时：比如垃圾回收内存管理， gorountines, channel 等等|
 
+- - -
+
 ## Go 编译器
 
 上面表格里面呈现的一样，与架构无关的Go的编译器实现代码在/src/cmd/gc这个目录里面，程序的入口在[lex.c][4]这个文件里面，姑且跳过一些程序的类似命令行参数处理等常规处理步骤，编译器主要执行如下的一些步骤：
@@ -45,13 +49,15 @@ Understanding project structure
 5. 然后生成object文件，以及相关符号表等。
 
 这里我们可以对比到clang的完整步骤:
+
 1. (source code)
 2. ==> preprocessing 					==> (.i,.ii,.mi,.mii)
 3. ==> parsing and semantic analysis 	==> (ast:abstract syntax tree) 
 4. ==> code generation and optionzation 	==> (.s)
 5. ==> assembler 						==> (.object)
 6. ==> linker 							==> (.so, .dylib)
- 
+
+- - - 
 
 ## 深入Go的语法看看
 现在我们详解前面编译流程里面的第二步。[go.y][3] 这个文件包含李golang的语义设计规则，是我们学习go的编译器并且深入理解golang语法规则的一个很好的入手点。这个文件由一系列如下的声明组成：
@@ -84,22 +90,25 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
 首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后攒国家一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。
  
+- - -
 
-Understanding nodes
+## 理解节点
 
-Now it is time to take a look at what a node actually is. First of all, a node is a struct (you can find a definition here). This struct contains a large number of properties, since it needs to support different kinds of nodes and different nodes have different attributes. Below is a description of several fields that I think are important to understand.
+现在我们要花点时间来理解"node"节点是一个啥子东东。node肯定是一个struct,你可以在[这里][6]找打结构体的定义。这个结构体你会看到有灰常多的属性，节点会有不同的用途，也会分成不同的类型，不同类型node，会有他相应的属性。下面会对一些我认为对理解node比较重要的属性做说明：
 
-Node struct field
-Description
-op	Node operation. Each node has this field. It distinguishes different kinds of nodes from each other. In our previous example, those were OTFUNC (operation type function) and ODCLFUNC (operation declaration function).
-type	This is a reference to another struct with type information for nodes that have type information (there are no types for some nodes, e.g., control flow statements, such as if, switch, or for).
-val	This field contains the actual values for nodes that represent literals.
-Now that you understand the basic structure of the node tree, you can put your knowledge into practice. In the next post, we will investigate what exactly the Go compiler generates, using a simple Go application as an example.
+|成员|说明|
+|---|---|
+|op|这个用来区分节点类型，前面的例子里面我们有看到OTFUNC(operation type function)和ODCLFUNC(operation declaration function)两个类型|
+|type|这个是Type的制作，如果节点需要类型说明，这个变量就指向相关类型信息，当然也有一些节点是没有类型信息，比如一些控制流statements：if、switch或者for等|
+|val|Val类型的变量，里面存储了节点的合法有效值|
 
+到这里我们已经说明了基础结构[node][6]，你可以结合现在的了解去详细阅读相关源代码。在下一节，我们会用一个简单的go程序来解读go编译器具体在生成节点这个阶段做了啥子黑科技。
 
+- - -
 
 [1]: http://blog.altoros.com/golang-part-1-main-concepts-and-project-structure.html "Golang Internals, Part 1: Main Concepts and Project Structure"
 [2]: https://www.gnu.org/software/bison/ ""
 [3]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.y "golang1.4/src/gc/go.y"
 [4]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/lex.c#L199 "main"
 [5]: http://dinosaur.compilertools.net/yacc/ "yacc"
+[6]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.h#L245 "node"
