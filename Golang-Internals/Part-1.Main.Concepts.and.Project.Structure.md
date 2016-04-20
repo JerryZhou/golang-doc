@@ -114,7 +114,7 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
 - - -
 
 [1]: http://blog.altoros.com/golang-part-1-main-concepts-and-project-structure.html "Golang Internals, Part 1: Main Concepts and Project Structure"
-[2]: https://www.gnu.org/software/bison/ ""
+[2]: https://www.gnu.org/software/bison/ "Bison"
 [3]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.y "golang1.4/src/gc/go.y"
 [4]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/lex.c#L199 "main"
 [5]: http://dinosaur.compilertools.net/yacc/ "yacc"
