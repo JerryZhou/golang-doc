@@ -64,6 +64,83 @@ Object文件比较有意义的部分是Sym数组，这其实是一个符号表�
 |Reloc|包含重定向信息，后面详细说明...|
 |Func|如果是函数类型的符号，这里存储的是函数的元信息|
 
+所有不同类型的符号都以常量的形式定义在`goobj`包里面，可以在[这里][4]找到。这里我们截取一部分：
+```
+const (
+	_ SymKind = iota
+
+	// readonly, executable
+	STEXT
+	SELFRXSECT
+
+	// readonly, non-executable
+	STYPE
+	SSTRING
+	SGOSTRING
+	SGOFUNC
+	SRODATA
+	SFUNCTAB
+	STYPELINK
+	SSYMTAB // TODO: move to unmapped section
+	SPCLNTAB
+	SELFROSECT
+```
+从前面的代码段我们看到`main.main`符号的Kind是1，对应到`STEXT`符号类型，这个类型的符号包含的是可执行代码。好让我们来看一下`Reloc`数组，我们先列一下数组成员的结构体：
+```
+type Reloc struct {
+	Offset int
+	Size   int
+	Sym    SymID
+	Add    int
+	Type int
+}
+```
+上面的结构体的代表的操作是：把符号所在地址加上偏移量Add这个地方的内存复制到内存地址范围[Offset, Offset+Size]的地方,
+也就是[memmove][5]: `memmove(Offset, sym_addr+Add, Size)`
+
+
+## 理解 relocations
+
+接下来我们用一个例子来说明relocations。首先我们在编译的时候带上一个`-S`的选项，让编译器帮我们打印出生成的相关汇编代码。
+	go tool 6g -S test.go
+我们找到生成的汇编代码关于main函数的那一段：
+
+```
+"".main t=1 size=48 value=0 args=0x0 locals=0x8
+	0x0000 00000 (test.go:3)	TEXT	"".main+0(SB),$8-0
+	0x0000 00000 (test.go:3)	MOVQ	(TLS),CX
+	0x0009 00009 (test.go:3)	CMPQ	SP,16(CX)
+	0x000d 00013 (test.go:3)	JHI	,22
+	0x000f 00015 (test.go:3)	CALL	,runtime.morestack_noctxt(SB)
+	0x0014 00020 (test.go:3)	JMP	,0
+	0x0016 00022 (test.go:3)	SUBQ	$8,SP
+	0x001a 00026 (test.go:3)	FUNCDATA	$0,gclocals·3280bececceccd33cb74587feedb1f9f+0(SB)
+	0x001a 00026 (test.go:3)	FUNCDATA	$1,gclocals·3280bececceccd33cb74587feedb1f9f+0(SB)
+	0x001a 00026 (test.go:4)	MOVQ	$1,(SP)
+	0x0022 00034 (test.go:4)	PCDATA	$0,$0
+	0x0022 00034 (test.go:4)	CALL	,runtime.printint(SB)
+	0x0027 00039 (test.go:5)	ADDQ	$8,SP
+	0x002b 00043 (test.go:5)	RET	,
+```
+
+在后续的博文里面我们会再次详解这一段汇编，并且尝试通过解析理解Go的运行时是怎么工作的。这个阶段我们对上述的汇编我们只关心这一句就可以了：
+
+	0x0022 00034 (test.go:4)	CALL	,runtime.printint(SB)
+	
+这一条指令位于函数区偏移量为0x0022(十六进制)的位置,或者说是偏移量为00034(十进制)的位置，这一行指令他实际上的作用是调用运行时的函数`runtime.printint`，这里的问题是编译器在编译期间其实是不知道运行时函数`runtime.printint`的真正地址的，这个函数是位于运行时的Object文件里面，当前编译的文件肯定是不知道这个函数地址，在这种情况下我们就用到了重定向技术，接下来的代码段正是对函数`runtime.printint`这个的重定向，笔者从oobj_explorer工具的汇编里面拷贝过来的。
+
+```
+				{
+                    Offset: 35,
+                    Size:   4,
+                    Sym:    goobj.SymID{Name:"runtime.printint", Version:0},
+                    Add:    0,
+                    Type:   3,
+                },
+```
+
+
+
 
 
 
@@ -73,6 +150,8 @@ Object文件比较有意义的部分是Sym数组，这其实是一个符号表�
 [1] http://blog.altoros.com/golang-internals-part-3-the-linker-and-object-files.html "The Linker, Object Files, and Relocations"
 [2] https://github.com/golang/go/tree/master/src/cmd/internal/goobj "goobj"
 [3] https://github.com/s-matyukevich/goobj_explorer "goobj_explorer"
+[4] https://github.com/golang/go/blob/master/src/cmd/internal/goobj/read.go#L30 "Sym Kind"
+[5] http://man7.org/linux/man-pages/man3/memmove.3.html "memmove"
 
 
 
