@@ -243,10 +243,12 @@ type itab struct {
 }
 ```
 结构体的最后一个变量`fun`是一个只有一个元素的数组，这里其实是一个可变长度的函数指针数组，存储了对应到interface定义的所有函数，Go的设计者这里是通过unsafe包提供的能力自己手动管理内存的，所以需要申请的内存大小原来的大小在加上interface定义的方法数减1乘以指针大小`unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize`。
+
 接下来会看到两个嵌套loop, 第一个loop我们遍历interface的方法，为每个方法尝试找到在type里面对应的方法，用如下的代码判断方法是否相等：
 `if t.mtyp == itype && t.name == iname && t.pkgpath == ipkgpath`
 如果找到了我们就把函数指针存储到`fun`里面：
 `*(*unsafe.Pointer)(add(unsafe.Pointer(&m.fun[0]), uintptr(k)*ptrSize)) = t.ifn`
+
 笔者发现这里的一个优化点：在interfae和type的方法都是按照字母序排序好的情况下，这里的循环其可以O(n+m)的情况下完成，而不需要O(n*m){译者注：这里的n 和m对应到interface和type的方法数，也就意味着n和m都是很小的数，所以这里没太大必要做过度优化去牺牲可阅读性}。
 
 好时光倒转一下，我们继续看前面关于node-tree的解析的最后一部分：
@@ -257,14 +259,16 @@ AS l(16)
 .   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
 .   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T
 ```
-这里把一个`EFACE l(16)`的节点赋值给了`NAME-main.i`变量，而`EFACE l(16)`包含了一个`autotmp_0003`的引用，而且前面的分析我们也知道`autotmp_0003`是一个指向`itab`结构体的指针，存储了`untime.typ2Itab`返回值；同时`EFACE l(16)`还包含了`autotmp_0000`的引用，而这个变量存储的值就是`main.t`,所以`main.i`就已经关联了一个`itab`和`main.T`，就能访问相关的方法和变量了。
-也就是`main.i`其实是runtime包里面的`iface`的实例，`iface`结构体定义如下：
+这里把一个`EFACE l(16)`的节点赋值给了`NAME-main.i`变量，而`EFACE l(16)`包含了一个`autotmp_0003`的引用，而且前面的分析我们也知道`autotmp_0003`是一个指向`itab`结构体的指针，存储了`untime.typ2Itab`返回值；同时`EFACE l(16)`还包含了`autotmp_0000`的引用，而这个变量存储的值就是`main.t`,所以`main.i`就已经关联了一个`itab`和`main.T`，就能访问相关的方法和变量了。也就是`main.i`其实是runtime包里面的`iface`的实例，`iface`结构体定义如下：
 ```
 type iface struct {
 	tab  *itab
 	data unsafe.Pointer
 }
 ```
+
+{译者注：好吧，看到这里，对于学过C++等多态语言的，不难类比到C++的多态机制，只是go的这里是动态多态，他的虚表itab是动态生成的, 同时把虚表单独拿出来和一个对象结合到一起变成一个iface，这样就提供了非常大的灵活性。}
+
 
 ## 接下来路在何方
 通过前面的缀叙，我们还仅仅只是覆盖了go编译器和go运行时非常小的一部分，还有非常多的东西可以探讨。在本系列接下来的文章里面我们还会继续探讨：object文件，链接过程，内存分配等。
