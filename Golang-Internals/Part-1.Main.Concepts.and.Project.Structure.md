@@ -4,7 +4,7 @@
 
 1. Go源代码的工程结构是怎么样的？
 2. Go的编译器是怎么工作的？
-3. 基础结构**Node-tree**在Go语言里面到底是一个神马东东？
+3. 基础结构**Node-tree**在Go编译器实现里面到底是一个神马东东？
 
 - - -
 
@@ -45,7 +45,7 @@ Understanding project structure
 1. 初始化基础数据结构
 2. 遍历所有Go的源文件，对每一个源文件调用`yyparse`函数。这个函数里面会执行具体的编译解析工作，Go编译器用的是[Bison][2]做解析器，Go的语法描述全部在[go.y][3](后续会详细说明这个文件)这个文件里面，经过这个步骤后，会生成完整的语法树。
 3. 会对生成的语法树做几次遍历操作，为树上的每个节点推导并填充类型信息，为一些必要的地方做type-casting等。
-4. 执行正在的编译操作，生成每个节点的汇编指令。
+4. 执行正在的编译操作，生成每个节点的[汇编指令-Go-assembler][10]。
 5. 然后生成object文件，以及相关符号表等。
 
 这里我们可以对比到clang的完整步骤:
@@ -96,6 +96,8 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
 
 首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后攒国家一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。
+
+这里关于Bison、Flex，Yacc，这些想深入了解的可以继续观看[龙书][7]、[虎书][8]，[鲸书][9]。
  
 - - -
 
@@ -119,3 +121,7 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
 [4]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/lex.c#L199 "main"
 [5]: http://dinosaur.compilertools.net/yacc/ "yacc"
 [6]: https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.h#L245 "node"
+[7]: https://github.com/chenruiao/ares/blob/master/books/Compilers%20Principles%20Techniques%20and%20Tools%20(2nd%20Edition)%20.pdf "Compilers: Principles,Techniques,and Tools"
+[8]: https://www.cs.princeton.edu/~appel/modern/basic/c/extract.pdf "Modern Compiler Implementation in C"
+[9] https://cseweb.ucsd.edu/classes/sp14/cse231-a/lectures/A-intro.pdf "Advanced Compiler Design and Implementation"
+[10] https://golang.org/doc/asm "Go assembler"
