@@ -181,7 +181,7 @@ AS l(16)
 .   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
 .   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T
 ```
-从截取的输出看到，编译器首先给赋值节点加另一个初始化节点`AS-init`，在初始化节点`AS-init`里面，创建一个新的自动变量`autotmp_0003`，并且赋值为`go.itab.*"".T."".I`，这一步后，就检查这个变量是否为nil`LITERAL-nil`，如果变量为nil，则调用函数`runtime.typ2Itab`，并传递如下参数：
+从截取的输出看到，编译器首先给赋值节点加另一个初始化节点`AS-init`，在初始化节点`AS-init`里面，创建一个新的自动变量`autotmp_0003`，并且赋值为`go.itab.*"".T."".I`，这一步后，就检查这个变量是否为nil`LITERAL-nil`，如果变量不为nil，则调用函数`runtime.typ2Itab`，并传递如下参数：
 
 `NAME-type.*"".T l(11)` 一个指向类型`main.T`的指针
 `NAME-type."".I l(16)` 一个指向类型`main.I`的指针
