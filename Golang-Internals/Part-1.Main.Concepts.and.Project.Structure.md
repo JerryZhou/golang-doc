@@ -1,4 +1,4 @@
-# 深入浅出 Golang，第一部分：工程的结构以及主要概念 [Part 1: Main Concepts and Project Structure] [1]
+# 深入浅出 Golang，第一部分：工程的结构以及主要概念 [Part 1: Main Concepts and Project Structure][1]
 
 ## 这一系列的博文主要是给那些已经对Go有基础了解后想对语言内部机制做更加深入探索的同学。在阅读完这个系列博文后读者应该能回答如下的三个问题：
 
