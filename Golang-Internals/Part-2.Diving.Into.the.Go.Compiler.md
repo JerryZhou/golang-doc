@@ -1,4 +1,4 @@
-# 深入浅出 Golang，第一部分：工程的结构以及主要概念 [Part 2: Diving Into the Go Compiler][1]
+# 深入浅出 Golang，第二部分：深入虎穴，一探编译器 [Part 2: Diving Into the Go Compiler][1]
 
 你是否知道我们是怎么通过Golang的运行时，让[interface][2]去引用到一个变量的？这其实是一个非常有深度的问题，因为在Golang里面一个type实现了某一个interface，但type本身没有存储任何信息关联到这个interface，当然我们可以尝试用我们从[Part 1]里面了解到的信息，从go的编译器实现角度来回答这个问题。
 
@@ -181,14 +181,98 @@ AS l(16)
 .   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
 .   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T
 ```
+从截取的输出看到，编译器首先给赋值节点加另一个初始化节点`AS-init`，在初始化节点`AS-init`里面，创建一个新的自动变量`autotmp_0003`，并且赋值为`go.itab.*"".T."".I`，这一步后，就检查这个变量是否为nil`LITERAL-nil`，如果变量为nil，则调用函数`runtime.typ2Itab`，并传递如下参数：
 
+`NAME-type.*"".T l(11)` 一个指向类型`main.T`的指针
+`NAME-type."".I l(16)` 一个指向类型`main.I`的指针
+以及`NAME-go.itab.*"".T."".I l(16)` 一个指向`go.itab.*"".T."".I`的变量
 
+从上面不难发现编译器创建了一个临时变量存储`main.T`转到`main.I`的类型转换结果。
 
+## 深入老巢，观察gititab函数
+我们先把the-fucking-code:[typ2Itab][4]列出来：
+```
+func typ2Itab(t *_type, inter *interfacetype, cache **itab) *itab {
+	tab := getitab(inter, t, false)
+	atomicstorep(unsafe.Pointer(cache), unsafe.Pointer(tab))
+	return tab
+}
+```
+擦。。。，上面的代码太简单了，所有事情其实都是给[getitab][5]干了，自己只是把结构存储到了cache里面。好接下来看getitab:
+```
+m = 
+    (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize, 0,
+    &memstats.other_sys))
+    m.inter = interm._type = typ
 
+ni := len(inter.mhdr)
+nt := len(x.mhdr)
+j := 0
+for k := 0; k < ni; k++ {
+	i := &inter.mhdr[k]
+	iname := i.name
+	ipkgpath := i.pkgpath
+	itype := i._type
+	for ; j < nt; j++ {
+		t := &x.mhdr[j]
+		if t.mtyp == itype && t.name == iname && t.pkgpath == ipkgpath {
+			if m != nil {
+				*(*unsafe.Pointer)(add(unsafe.Pointer(&m.fun[0]), uintptr(k)*ptrSize)) = t.ifn
+			}
+		}
+	}
+}
+```
+getitab函数非常大，这里只截取了笔者认为最有价值的部分。首先会申请内存存储返回的结果：
+```
+m = 
+    (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize, 0,
+    &memstats.other_sys))
+    m.inter = interm._type = typ
+```
 
+这里调用的是一个很奇怪的函数申请的内存，为什么会调用这么一个东东，我们得看下`itab`结构体的定义：
+```
+type itab struct {
+	inter  *interfacetype
+	_type  *_type
+	link   *itab
+	bad    int32
+	unused int32
+	fun    [1]uintptr // variable sized
+}
+```
+结构体的最后一个变量`fun`是一个只有一个元素的数组，这里其实是一个可变长度的函数指针数组，存储了对应到interface定义的所有函数，Go的设计者这里是通过unsafe包提供的能力自己手动管理内存的，所以需要申请的内存大小原来的大小在加上interface定义的方法数减1乘以指针大小`unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize`。
+接下来会看到两个嵌套loop, 第一个loop我们遍历interface的方法，为每个方法尝试找到在type里面对应的方法，用如下的代码判断方法是否相等：
+`if t.mtyp == itype && t.name == iname && t.pkgpath == ipkgpath`
+如果找到了我们就把函数指针存储到`fun`里面：
+`*(*unsafe.Pointer)(add(unsafe.Pointer(&m.fun[0]), uintptr(k)*ptrSize)) = t.ifn`
+笔者发现这里的一个优化点：在interfae和type的方法都是按照字母序排序好的情况下，这里的循环其可以O(n+m)的情况下完成，而不需要O(n*m){译者注：这里的n 和m对应到interface和type的方法数，也就意味着n和m都是很小的数，所以这里没太大必要做过度优化去牺牲可阅读性}。
+
+好时光倒转一下，我们继续看前面关于node-tree的解析的最后一部分：
+```
+AS l(16) 
+.   NAME-main.i l(16) main.I
+.   EFACE l(16) main.I
+.   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T
+```
+这里把一个`EFACE l(16)`的节点赋值给了`NAME-main.i`变量，而`EFACE l(16)`包含了一个`autotmp_0003`的引用，而且前面的分析我们也知道`autotmp_0003`是一个指向`itab`结构体的指针，存储了`untime.typ2Itab`返回值；同时`EFACE l(16)`还包含了`autotmp_0000`的引用，而这个变量存储的值就是`main.t`,所以`main.i`就已经关联了一个`itab`和`main.T`，就能访问相关的方法和变量了。
+也就是`main.i`其实是runtime包里面的`iface`的实例，`iface`结构体定义如下：
+```
+type iface struct {
+	tab  *itab
+	data unsafe.Pointer
+}
+```
+
+## 接下来路在何方
+通过前面的缀叙，我们还仅仅只是覆盖了go编译器和go运行时非常小的一部分，还有非常多的东西可以探讨。在本系列接下来的文章里面我们还会继续探讨：object文件，链接过程，内存分配等。
 
 
 
 [1]: http://blog.altoros.com/golang-internals-part-2-diving-into-the-go-compiler.html "Part 2: Diving Into the Go Compiler"
 [2]: http://jordanorelli.com/post/32665860244/how-to-use-interfaces-in-go "interface in go"
 [3]: https://golang.org/cmd/compile/ "Compiler"
+[4]: https://golang.org/src/cmd/compile/internal/gc/builtin/runtime.go?h=typ2Itab#L63 "typ2Itab"
+[5]: https://golang.org/src/runtime/iface.go?h=getitab#L22 "getitab"
