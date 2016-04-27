@@ -1,6 +1,6 @@
 # 深入浅出 Golang，第五部分：运行时的启动过程 [Part 5: the Runtime Bootstrap Process][1]
 
-搞清楚Golang-Runtime的启动引导过程是理解Golang-Runtime的工作机制非常关键的一步。如果想把Golang玩弄于鼓掌之间，就必须搞清楚他的运行时。所以<深入浅出Golang>这个系列的第五部分，我们就来重点探讨Golang-Runtime以及它的启动引导过程。
+搞清楚Golang-Runtime的启动引导过程是理解Golang-Runtime的工作机制非常关键的一步。如果想把Golang玩弄于鼓掌之间，就必须搞清楚它的运行时。所以<深入浅出Golang>这个系列的第五部分，我们就来重点探讨Golang-Runtime以及它的启动引导过程。
 
 这一部分我们会着重三个方面的探讨：
 
@@ -11,7 +11,7 @@
 注意：本文会涉及到一些Go-Assemble-Code, 也就要求你对Golang的汇编应该具备基本的了解。如果不了解,可以先去参考[这篇文章][2]，当然如果不习惯E文，也还是有[译文][5]可读的。
 
 ## 从程序的入口开始
-我们先写一个简单的测试程序，反汇编一下，看开始执行一个Go程序，最开始调用的函数或者说执行的代码是到底神马。我们用如下的测试程序来做实现：
+我们先写一个简单的测试程序，编译一下，看开始执行一个Go程序，最开始调用的函数或者说执行的代码是到底神马。我们用如下的测试程序来做实验：
 ```
 package main
 
@@ -26,10 +26,11 @@ func main() {
 	
 {对于Go1.5以上: `go tool compile test.go`  和 `go tool link test.o`}
 	
-然后我没用objdump工具来看下pe，对于没有这个工具的Windows或者Mac平台用户你就直接跳过这一步，查看笔者这里贴出来的结果吧。
+然后我们用objdump工具来看下这个执行镜像的pe头，对于没有这个工具的Windows或者Mac平台用户你就直接跳过这一步，查看笔者这里贴出来的结果就好。
 
 	objdump -f 6.out
 	
+{对于Mac用户，其实可以`brew install binutils`，里面有带一个`gobjdump -f test.out`}
 通过上面的命令应该可以得到如下输出：
 ```
 6.out:     file format elf64-x86-64
@@ -37,10 +38,8 @@ architecture: i386:x86-64, flags 0x00000112:
 EXEC_P, HAS_SYMS, D_PAGED
 start address 0x000000000042f160
 ```
-{对于Mac用户，其实可以`brew install binutils`，里面有带一个`gobjdump -f test.out`}
 
-
-通过上面的操作，我们知道了起始地址，那我们通过如下命令把执行文件反编译到汇编代码：
+通过上面的操作，我们知道了起始地址，那我们通过如下命令把执行文件编译到汇编代码：
 
 	objdump -d 6.out > disassemble.txt
 
@@ -92,7 +91,7 @@ MOVQ		BX, g_stackguard1(DI)
 MOVQ		BX, (g_stack+stack_lo)(DI)
 MOVQ		SP, (g_stack+stack_hi)(DI)
 ```
-首先把全局变量`runtime·g0`放到`DI`寄存器，这个变量定义在`proc1.go`文件里面，是一个`runtime.g`类型指针，相信看过[Part-3][4]对这个类型应该不陌生了，系统会为每一个Goroutine创建一个上下文，你应该也能猜到这个就是第一个Gorountine的上下文，也就类似于主线程的线程上下文了。后面的汇编我们初始化`runtime.g0`的各个成员变量，在汇编里面`stack_lo`和`stack_hi`这两个大家要弄清楚他们的含义，他们是当前Goroutine的栈的其实地址和结束地址，汇编里面还有两个`g_stackguard0`和`g_stackguard1`变量，他们分别是搞什么黑科技的呢？要搞清楚这两个变量，我们要要先暂停`runtime·rt0_go`函数的探讨，然后专门讨论一下Go的真正黑科技`resizable stacks`动态栈。
+首先把全局变量`runtime·g0`放到`DI`寄存器，这个变量定义在`proc1.go`文件里面，是一个`runtime.g`类型指针，相信看过[Part-3][4]对这个类型应该不陌生，系统会为每一个goroutine创建一个上下文，你应该也能猜到这个就是第一个gorountine的上下文，也就类似于主线程的线程上下文。后面的汇编我们初始化`runtime.g0`的各个成员变量，在汇编里面`stack_lo`和`stack_hi`这两个大家要弄清楚他们的含义，他们是当前goroutine的栈的起始地址和结束地址，汇编里面还有两个`g_stackguard0`和`g_stackguard1`变量，他们分别是搞什么黑科技的呢？要搞清楚这两个变量，我们要要先暂停`runtime·rt0_go`函数的探讨，然后专门讨论一下Go的真正黑科技`resizable stacks`动态栈。
 
 ## 实现动态栈`resizable stacks`
 
@@ -149,7 +148,7 @@ type stack struct {
 	hi uintptr
 }
 ```
-知道栈顶指针指向[lo, hi)，已经使用的空间可以通过`used := old.hi - gp.sched.sp`计算得到，那么当前栈的空闲空间是`space := gp.stackAlloc-used`，但可被使用的空闲空间其实是要除掉一部分系统保留区域`StackGuard`，也就是说栈的阀值：`runtime.g.stackguard0 == runtime.stack.lo+StackGuard`。其实关于栈的阀值还有一个是`runtime.g.stackguard1`他是用于cgo里面动态调整栈用的，具体的用法跟这里类似。关于调整栈大小的函数`runtime.morestack_noctxt`其实也是一个值得说一说的函数，后续篇幅中我们再来聊这个，我们这里抓紧回到主线继续讨论启动引导过程。
+知道栈顶指针指向区间段[lo, hi)，已经使用的空间可以通过`used := old.hi - gp.sched.sp`计算得到，那么当前栈的空闲空间是`space := gp.stackAlloc-used`，但可被使用的空闲空间其实是要除掉一部分系统保留区域`StackGuard`，也就是说栈的阀值：`runtime.g.stackguard0 == runtime.stack.lo+StackGuard`。其实关于栈的阀值还有一个是`runtime.g.stackguard1`他是用于cgo里面动态调整栈用的，具体的用法跟这里类似。关于调整栈大小的函数`runtime.morestack_noctxt`其实也是一个值得说一说的函数，后续篇幅中我们再来聊这个，我们这里抓紧回到主线继续讨论启动引导过程。
 
 ## 继续Go的Bootstrapping过程
 我们看`runtime.rt0_go`函数的第三部分：
@@ -178,7 +177,7 @@ notintel:
 	MOVL	DX, runtime·cpuid_edx(SB)
 nocpuinfo:
 ```
-这一部分对于理解整个Go的启动引导过程不是非常关键，而且汇编里面的注释也基本进行了有效的自说明，我们这里只是单纯过一遍。代码开始部分主要是找出当前的CPU架构，如果是Intel的则设置变量`runtime·lfenceBeforeRdtsc`为1，这个变量主要是用在函数`runtime·cputicks`里面根据这个变量用不同的汇编代码去获取CPU的`ticks`，后面的汇编代码则执行了一个汇编指令`CPUID`然后把结果保存在`runtime.cpuid_ecx`和`runtime.cpuid_edx`里面，这里存储的数值主要是用来根据不同的cpu架构选择我们使用什么样的hash算法。
+这一部分对于理解整个Go的启动引导过程不是非常关键，而且汇编里面的注释也基本进行了有效的自说明，我们这里只是单纯过一遍。代码开始部分主要是找出当前的CPU架构，如果是Intel架构，则设置变量`runtime·lfenceBeforeRdtsc`为1，这个变量主要是用在函数`runtime·cputicks`里面，在这个函数里面根据这个变量用不同的汇编代码去获取CPU的`ticks`，后面的汇编代码则执行了一个汇编指令`CPUID`然后把结果保存在`runtime.cpuid_ecx`和`runtime.cpuid_edx`里面，这里存储的数值主要是用来根据不同的cpu架构选择我们使用什么样的hash算法。
 
 继续探索`runtime.rt0_go`函数的第四部分：
 ```
@@ -201,7 +200,7 @@ MOVQ	AX, g_stackguard1(CX)
 CMPL	runtime·iswindows(SB), $0
 JEQ ok
 ```
-第四部分是只有开启了`cgo`支持的情况下才会执行，好`cgo`又是一个比较独立的主题，在后面的讨论中我们会单独探讨。这里我们还是抓主线，搞清楚Bootstrapping过程，所以我们这里也依然跳过这一部分。
+第四部分是只有开启了`cgo`支持的情况下才会执行，好`cgo`又是一个比较独立的主题，在后面的讨论中我们会单独探讨。这里我们还是抓主线，搞清楚Bootstrapping过程，所以我们这里依然跳过这一部分。
 
 来到`runtime.rt0_go`函数的第五部分，这一部分主要是关于初始化TLS的：
 ```
