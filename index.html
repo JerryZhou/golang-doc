@@ -1,0 +1,1211 @@
+<!doctype HTML>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>深入浅出Golang</title>
+<style>
+body {
+    font-family: Tahoma;
+    font-size: 10pt;
+    line-height: 170%;
+padding: 0 10pt;
+}
+
+nav {
+background: gray;
+color: white;
+       overflow-x: hidden;
+       overflow-y: auto;
+position: fixed;
+top: 0;
+left: 0;
+bottom: 0;
+width: 200px;
+}
+
+header {
+    padding-left: 200px;
+}
+
+article {
+    padding-left: 200px;
+}
+
+footer {
+    padding-left: 200px;
+}
+</style>
+</head>
+<body>
+<header>
+<h1 id="golang-internal-golang-">Golang-Internal:深入浅出 Golang  </h1>
+<p>想要了解Golang 的实现原理，一窥运行时的内部机制，可以阅读当前文章</p>
+
+</header>
+<nav>
+<ul>
+<li class="level2"><a href="#1">这一系列的博文主要是给那些已经对Go有基础了解后想对语言内部机制做更加深入探索的同学。在阅读完这个系列博文后读者应该能回答如下的三个问题：</a></li><li class="level2"><a href="#2">开始装逼</a></li><li class="level2"><a href="#3">工程结构</a></li><li class="level2"><a href="#4">Go 编译器</a></li><li class="level2"><a href="#5">深入Go的语法看看</a></li><li class="level2"><a href="#6">理解节点</a></li><li class="level2"><a href="#7">前戏</a></li><li class="level2"><a href="#8">编写&quot;hello world&quot;程序</a></li><li class="level2"><a href="#9">理解main方法的node-tree</a></li><li class="level2"><a href="#10">编译器是怎么修订赋值node的</a></li><li class="level2"><a href="#11">深入老巢，观察gititab函数</a></li><li class="level2"><a href="#12">接下来路在何方</a></li><li class="level2"><a href="#13">怎么生成Go的Object文件</a></li><li class="level2"><a href="#14">详解Object文件</a></li><li class="level2"><a href="#15">理解 relocations</a></li><li class="level2"><a href="#16">链接器怎么执行重定向呢</a></li><li class="level2"><a href="#17">理解TLS(thread-local-storage)</a></li><li class="level2"><a href="#18">进一步深挖Object文件</a></li><li class="level2"><a href="#19">函数结构体</a></li><li class="level2"><a href="#20">垃圾回收是怎么利用函数的Metadata的呢？</a></li><li class="level2"><a href="#21">还有啥？？</a></li><li class="level2"><a href="#22">从程序的入口开始</a></li><li class="level2"><a href="#23">启动那一坨</a></li><li class="level2"><a href="#24">实现动态栈<code>resizable stacks</code></a></li><li class="level2"><a href="#25">继续Go的Bootstrapping过程</a></li><li class="level2"><a href="#26">TLS的实现细节</a></li><li class="level2"><a href="#27">继续Bootstrapping过程</a></li><li class="level2"><a href="#28">还有啥？</a></li><li class="level2"><a href="#29">启动序列</a></li><li class="level2"><a href="#30"><code>runtime.args</code>参数分析</a></li><li class="level2"><a href="#31"><code>runtime.osinit</code>系统相关的初始化</a></li><li class="level2"><a href="#32"><code>runtime.schedinit</code>初始化调度器</a></li><li class="level3"><a href="#32.1">栈回溯初始化<code>tracebackinit</code></a></li><li class="level3"><a href="#32.2">符号验证<code>moduledataverify</code></a></li><li class="level3"><a href="#32.3">初始化动态栈的分配池<code>stackinit</code></a></li><li class="level3"><a href="#32.4">初始化内存分配器 <code>mallocinit</code></a></li><li class="level4"><a href="#32.4.1">初始化类大小</a></li><li class="level4"><a href="#32.4.2">保留部分虚拟内存</a></li><li class="level4"><a href="#32.4.3">初始化堆</a></li><li class="level4"><a href="#32.4.4">最后的内存初始化操作</a></li><li class="level2"><a href="#33">到底还有谁？</a></li><li class="level3"><a href="#33.1">欢迎转载</a></li></ul>
+
+</nav>
+<article>
+<h1 id="-golang-part-1-main-concepts-and-project-structure-1-">深入浅出 Golang，第一部分：工程的结构以及主要概念 <a href="http://blog.altoros.com/golang-part-1-main-concepts-and-project-structure.html" title="Golang Internals, Part 1: Main Concepts and Project Structure">Part 1: Main Concepts and Project Structure</a></h1>
+<h2 id="1">这一系列的博文主要是给那些已经对Go有基础了解后想对语言内部机制做更加深入探索的同学。在阅读完这个系列博文后读者应该能回答如下的三个问题：</h2>
+<ol>
+<li>Go源代码的工程结构是怎么样的？</li>
+<li>Go的编译器是怎么工作的？</li>
+<li>基础结构<strong>Node-tree</strong>在Go编译器实现里面到底是一个神马东东？</li>
+</ol>
+<hr>
+<h2 id="2">开始装逼</h2>
+<p>开始接触一门编程语言，我们通常会接触到很多书籍专注在语言的语法、语义甚至标准库等相关方面。但是你很难从这些书籍中去了解关于语言的内存对象模型，以及内置函数调用的时候到底编译器生成了什么样的中间代码(汇编代码或者类汇编代码)。当然对于一个开源的编程语言，你想要了解的这些相对深入的语言机制都可以从源代码里面获取到，回过头来以个人经验来说，要想从源代码理解到这些内容却也是相当困难的，所以我们这里写一个引子，和大家一起从源代码里面窥探一下golang的胴体(咔擦。。。)。</p>
+<p>在开始真正代码之旅之前，我们需要先git一份源代码：</p>
+<p><code>git clone https://github.com/golang/go</code></p>
+<p><em>注意:主干代码持续在变更，我们这里为了保持文章的一致性我们选用go1.4发布分支的代码作为本系列文章的参照</em></p>
+<hr>
+<h2 id="3">工程结构</h2>
+<p>Understanding project structure</p>
+<p>从Go的仓库src目录下，我们会看到很多子目录。大部分子目录都是Go标准库的代码。标准库里面的每个子目录的里面代码的包名和目录名保持一致，这也是go的标准命名规则。除开这部分标准库，还有一些目录，其中重要的目录有如下几个:</p>
+<table>
+<thead>
+<tr>
+<th>目录</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/src/cmd/</td>
+<td>包含了各种golang的命令</td>
+</tr>
+<tr>
+<td>/src/cmd/go</td>
+<td>包含了命令行工具Go的实现：通过调用其他编译，链接工具，实现下载编译Go的源文件</td>
+</tr>
+<tr>
+<td>/src/cmd/dist</td>
+<td>这个工具负责编译目录下的其他命令行工具，并且负责编译Go的标准库</td>
+</tr>
+<tr>
+<td>/src/cmd/gc</td>
+<td>这是一个与架构无关的Go的编译器实现，是第一个Go的编译器</td>
+</tr>
+<tr>
+<td>/src/cmd/ld</td>
+<td>Go的链接器的实现，与平台相关的代码会放在以平台架构命名的子目录下面</td>
+</tr>
+<tr>
+<td>/src/cmd/5a,6a,8a,9a</td>
+<td>这里面是Go为各个不同平台实现的汇编指令编译器，Go的汇编指令跟本机的汇编指令不一样，这些工具负责把Go的汇编指令翻译为不同架构的汇编指令，详细信息可以在<a href="https://golang.org/doc/asm">这里</a>查看。</td>
+</tr>
+<tr>
+<td>/src/lib9,/src/libio,/src/liblink</td>
+<td>这些是编译器，链接器以及Go运行时用到的一些库</td>
+</tr>
+<tr>
+<td>/src/runtime/</td>
+<td>最重要的Go包，会包含进所有的Go程序里面，这是整个Go的运行时：比如垃圾回收内存管理， gorountines, channel 等等</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="4">Go 编译器</h2>
+<p>上面表格里面呈现的一样，与架构无关的Go的编译器实现代码在/src/cmd/gc这个目录里面，程序的入口在<a href="https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/lex.c#L199" title="main">lex.c</a>这个文件里面，姑且跳过一些程序的类似命令行参数处理等常规处理步骤，编译器主要执行如下的一些步骤：</p>
+<ol>
+<li>初始化基础数据结构</li>
+<li>遍历所有Go的源文件，对每一个源文件调用<code>yyparse</code>函数。这个函数里面会执行具体的编译解析工作，Go编译器用的是<a href="https://www.gnu.org/software/bison/" title="Bison">Bison</a>做解析器，Go的语法描述全部在<a href="https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.y" title="golang1.4/src/gc/go.y">go.y</a>(后续会详细说明这个文件)这个文件里面，经过这个步骤后，会生成完整的语法树。</li>
+<li>会对生成的语法树做几次遍历操作，为树上的每个节点推导并填充类型信息，为一些必要的地方做type-casting等。</li>
+<li>执行正在的编译操作，生成每个节点的[汇编指令-Go-assembler][10]。</li>
+<li>然后生成object文件，以及相关符号表等。</li>
+</ol>
+<p>这里我们可以对比到clang的完整步骤:</p>
+<ol>
+<li>(source code)</li>
+<li>==&gt; preprocessing                     ==&gt; (.i,.ii,.mi,.mii)</li>
+<li>==&gt; parsing and semantic analysis     ==&gt; (ast:abstract syntax tree) </li>
+<li>==&gt; code generation and optionzation     ==&gt; (.s)</li>
+<li>==&gt; assembler                         ==&gt; (.object)</li>
+<li>==&gt; linker                             ==&gt; (.so, .dylib)</li>
+</ol>
+<hr>
+<h2 id="5">深入Go的语法看看</h2>
+<p>现在我们详解前面编译流程里面的第二步。<a href="https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.y" title="golang1.4/src/gc/go.y">go.y</a> 这个文件包含李golang的语义设计规则，是我们学习go的编译器并且深入理解golang语法规则的一个很好的入手点。这个文件由一系列如下的声明组成：</p>
+<pre><code>xfndcl:
+    LFUNC fndcl fnbody
+fndcl:
+     sym &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; fnres
+    | &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; sym &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; fnres</code></pre>
+<p>上面的代码段声明了两个节点xfndcl和fndcl的定义。fundcl这个节点可以有两种表现形式，第一种形式对应如下的一个构造函数：</p>
+<pre><code>somefunction(x int, y int) int</code></pre>
+<p>第二种形式对应到如下的形式：</p>
+<pre><code>(t *SomeType) somefunction(x int, y int) int</code></pre>
+<p>xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组成。</p>
+<p><a href="https://www.gnu.org/software/bison/" title="Bison">Bison</a>或者<a href="http://dinosaur.compilertools.net/yacc/" title="yacc">Yacc</a>语法解析器一个重要的特性就是允许放置一段C代码在节点的声明后面，这一小段C代码会每次在找到源文件里面匹配的代码块的时候执行，在执行的代码块里面可以通过$$引用result节点, 用$1、$2、$3... 引用子节点。
+我们用一个例子(从g.y里面截取的一个简化版的节点配置)来理解我们这里提到的解析器怎么插入代码：</p>
+<pre><code>fndcl:
+      sym &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; fnres
+    {
+      t = nod(OTFUNC, N, N);
+      t-&gt;list = $3;
+      t-&gt;rlist = $5;
+
+      $$ = nod(ODCLFUNC, N, N);
+      $$-&gt;nname = newname($1);
+      $$-&gt;nname-&gt;ntype = t;
+      declare($$-&gt;nname, PFUNC);
+      }
+    | &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; sym &#39;(&#39; oarg_type_list_ocomma &#39;)&#39; fnres</code></pre>
+<p>首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后攒国家一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。</p>
+<p>这里关于Bison、Flex，Yacc，这些想深入了解的可以继续观看<a href="https://github.com/chenruiao/ares/blob/master/books/Compilers%20Principles%20Techniques%20and%20Tools%20(2nd%20Edition)%20.pdf" title="Compilers: Principles,Techniques,and Tools">龙书</a>、<a href="https://www.cs.princeton.edu/~appel/modern/basic/c/extract.pdf" title="Modern Compiler Implementation in C">虎书</a>，[鲸书][9]。</p>
+<hr>
+<h2 id="6">理解节点</h2>
+<p>现在我们要花点时间来理解&quot;node&quot;节点是一个啥子东东。node肯定是一个struct,你可以在<a href="https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.h#L245" title="node">这里</a>找打结构体的定义。这个结构体你会看到有灰常多的属性，节点会有不同的用途，也会分成不同的类型，不同类型node，会有他相应的属性。下面会对一些我认为对理解node比较重要的属性做说明：</p>
+<table>
+<thead>
+<tr>
+<th>成员</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>op</td>
+<td>这个用来区分节点类型，前面的例子里面我们有看到OTFUNC(operation type function)和ODCLFUNC(operation declaration function)两个类型</td>
+</tr>
+<tr>
+<td>type</td>
+<td>这个是Type的制作，如果节点需要类型说明，这个变量就指向相关类型信息，当然也有一些节点是没有类型信息，比如一些控制流statements：if、switch或者for等</td>
+</tr>
+<tr>
+<td>val</td>
+<td>Val类型的变量，里面存储了节点的合法有效值</td>
+</tr>
+</tbody>
+</table>
+<p>到这里我们已经说明了基础结构<a href="https://github.com/golang/go/blob/release-branch.go1.4/src/cmd/gc/go.h#L245" title="node">node</a>，你可以结合现在的了解去详细阅读相关源代码。在下一节，我们会用一个简单的go程序来解读go编译器具体在生成节点这个阶段做了啥子黑科技。</p>
+<hr>
+<p>[9] <a href="https://cseweb.ucsd.edu/classes/sp14/cse231-a/lectures/A-intro.pdf">https://cseweb.ucsd.edu/classes/sp14/cse231-a/lectures/A-intro.pdf</a> &quot;Advanced Compiler Design and Implementation&quot;
+[10] <a href="https://golang.org/doc/asm">https://golang.org/doc/asm</a> &quot;Go assembler&quot;</p>
+
+<h1 id="-golang-part-2-diving-into-the-go-compiler-1-">深入浅出 Golang，第二部分：深入虎穴，一探编译器 <a href="http://blog.altoros.com/golang-internals-part-2-diving-into-the-go-compiler.html" title="Part 2: Diving Into the Go Compiler">Part 2: Diving Into the Go Compiler</a></h1>
+<p>你是否知道我们是怎么通过Golang的运行时，让<a href="http://jordanorelli.com/post/32665860244/how-to-use-interfaces-in-go" title="interface in go">interface</a>去引用到一个变量的？这其实是一个非常有深度的问题，因为在Golang里面一个type实现了某一个interface，但type本身没有存储任何信息关联到这个interface，当然我们可以尝试用我们从[Part 1]里面了解到的信息，从go的编译器实现角度来回答这个问题。</p>
+<p>为了更精准的回答上面的类似问题，我们接下来更加深入的分析go的编译器：我们写一个非常小的golang版本的&quot;hello world&quot;，然后通过分析这个&quot;hello world&quot;，了解内部的类型转换等相关机制，通过例子也进一步对node-tree的生成过程做详细解析。当然了解node-tree的生成过程不是我们的最终目的，我们的目的是以此为基础去横向涉猎go编译器的其他特性。</p>
+<hr>
+<h2 id="7">前戏</h2>
+<p>为了准备了解编译器，我们准备我们的实验环境，我们从golang的编译器直接入手，而不是通过golang的集成工具。可以通过如下的方式够到编译器(注意安装go1.4版本)：</p>
+<pre><code>go tool 6g test.go</code></pre>
+<p>如果使用的是go1.5 或者更高的版本可以用如下的命令：</p>
+<pre><code>go tool compile test.go</code></pre>
+<p>上面的命令会编译源文件test.go，然后在当前目录生成object文件。在笔者机器上6g是一个amd64架构的编译器，要生成其他架构的代码必须要用相应架构的编译器。
+我们直接操作编译器的时候，我们可以手动在编译器上加上一些命令行参数，让编译器给我们生成相关辅助信息，更详细的编译器参数可以参考这个<a href="https://golang.org/cmd/compile/" title="Compiler">地方</a>，我们这里会给编译器上架<em>-W</em>参数，加上这个参数，编译器会把node-tree打印出来。</p>
+<h2 id="8">编写&quot;hello world&quot;程序</h2>
+<p>首先我们编写一个用于分析的简单go程序，我的版本是这样的：</p>
+<pre><code>  1  package main
+  2 
+  3  type I interface {
+  4          DoSomeWork()
+  5  }
+  6 
+  7  type T struct {
+  8          a int
+  9  }
+ 10 
+ 11  func (t *T) DoSomeWork() {
+ 12  }
+ 13 
+ 14  func main() {
+ 15          t := &amp;T{}
+ 16          i := I(t)
+ 17          print(i)
+ 18  }</code></pre>
+<p>上面的示例代码非常简洁，严格意义上也就只有第17行看起来是可以不用的，但在golang里面第17行却也是必须的，因为没有17行就会是unused variable，这在golang里面是编译器错误。把上面的代码保存为test.go, 接下来我们就通过编译器编译这个源文件。</p>
+<pre><code>go tool 6g -W test.go</code></pre>
+<p>执行上面的命令会看到编译器打印了源文件里面每一个函数的node-tree，我们这里主要是打印出main函数和init函数，其中init函数编译器自动为每一个包文件加上的内部函数，我们这里直接无视init函数就好。
+编译器打印node-tree的时候，会为每一个函数打印两个版本的node-tree，第一个版本是语法此法解析后的原始版本，第二个版本是执行了类型检查，并填充了相关类型信息并做一些必要的修正后的版本。</p>
+<pre><code>before I.DoSomeWork
+.   CALLINTER l(20) tc(1)
+.   .   DOTINTER l(20) x(0+0) tc(1) FUNC-method(*struct {}) func()
+.   .   .   NAME-main..this u(1) a(true) g(1) l(20) x(0+0) class(PPARAM) f(1) esc(s) tc(1) used(true) main.I
+.   .   .   NAME-main.DoSomeWork u(1) a(true) l(20) x(0+0)
+after walk I.DoSomeWork
+.   CALLINTER u(100) l(20) tc(1)
+.   .   DOTINTER u(2) l(20) x(0+0) tc(1) FUNC-method(*struct {}) func()
+.   .   .   NAME-main..this u(1) a(true) g(1) l(20) x(0+0) class(PPARAM) f(1) esc(s) tc(1) used(true) main.I
+.   .   .   NAME-main.DoSomeWork u(1) a(true) l(20) x(0+0)</code></pre>
+<h2 id="9">理解main方法的node-tree</h2>
+<p>我们开始先看一下在编译器修订之前的main方法的node-tree:</p>
+<pre><code>DCL l(15)
+.   NAME-main.t u(1) a(1) g(1) l(15) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) PTR64-*main.T
+
+AS l(15) colas(1) tc(1)
+.   NAME-main.t u(1) a(1) g(1) l(15) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) PTR64-*main.T
+.   PTRLIT l(15) esc(no) ld(1) tc(1) PTR64-*main.T
+.   .   STRUCTLIT l(15) tc(1) main.T
+.   .   .   TYPE &lt;S&gt; l(15) tc(1) implicit(1) type=PTR64-*main.T PTR64-*main.T
+
+DCL l(16)
+.   NAME-main.i u(1) a(1) g(2) l(16) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) main.I
+
+AS l(16) tc(1)
+.   NAME-main.autotmp_0000 u(1) a(1) l(16) x(0+0) class(PAUTO) esc(N) tc(1) used(1) PTR64-*main.T
+.   NAME-main.t u(1) a(1) g(1) l(15) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) PTR64-*main.T
+
+AS l(16) colas(1) tc(1)
+.   NAME-main.i u(1) a(1) g(2) l(16) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) main.I
+.   CONVIFACE l(16) tc(1) main.I
+.   .   NAME-main.autotmp_0000 u(1) a(1) l(16) x(0+0) class(PAUTO) esc(N) tc(1) used(1) PTR64-*main.T
+
+VARKILL l(16) tc(1)
+.   NAME-main.autotmp_0000 u(1) a(1) l(16) x(0+0) class(PAUTO) esc(N) tc(1) used(1) PTR64-*main.T
+
+PRINT l(17) tc(1)
+PRINT-list
+.   NAME-main.i u(1) a(1) g(2) l(16) x(0+0) class(PAUTO) f(1) ld(1) tc(1) used(1) main.I</code></pre>
+<p>尝试理解一下上面node-tree。接下来的解释过程，我们会对node-tree做适当的删减，去掉一些意义不大的部分，让他看起来更加简洁精炼。
+第一个node非常简单：</p>
+<pre><code>DCL l(15)
+.   NAME-main.t l(15) PTR64-*main.T</code></pre>
+<p>第一行<code>DCL l(15)</code> 声明node，其中<code>l(15)</code>的意思是node来自于源文件的第15行。下面的一行<code>NAME-main.t l(15) PTR64-*main.T</code>是节点的名字是<code>main.t</code>对应到源文件的15行变量<code>t</code>，变量t是一个64位的指针，指向类型为<code>main.T</code>的变量</p>
+<p>接下来的会稍微复杂一点，理解起来也会棘手一些：</p>
+<pre><code>AS l(15) 
+.   NAME-main.t l(15) PTR64-*main.T
+.   PTRLIT l(15) PTR64-*main.T
+.   .   STRUCTLIT l(15) main.T
+.   .   .   TYPE l(15) type=PTR64-*main.T PTR64-*main.T</code></pre>
+<p>第一行<code>AS l(15)</code> 说明是一个用于赋值的node, node的一个孩子<code>NAME-main.t l(15) PTR64-*main.T</code>是一个具名的节点，代表<code>main.t</code>这个变量；第二个孩子<code>PTRLIT l(15) PTR64-*main.T</code>是我们用来赋值给<code>main.t</code>的节点，这个用来赋值的节点字面<code>PRTLIT</code>上是一个取地址操作，相当于<code>&amp;</code>取地址符，这个取地址操作的节点也有一个孩子节点<code>STRUCTLIT l(15) main.T</code>，这个节点是指向具体的类型<code>main.T</code>；
+接下来又是一个声明节点：</p>
+<pre><code>DCL l(16)
+.   NAME-main.i l(16) main.I</code></pre>
+<p>声明了一个类型为<code>main.I</code>的变量<code>main.i</code></p>
+<p>然后编译器创建了一个临时变量<code>autotmp_0000</code>，并且把<code>main.t</code> 赋值给它。</p>
+<pre><code>AS l(16) tc(1)
+.   NAME-main.autotmp_0000 l(16) PTR64-*main.T
+.   NAME-main.t l(15) PTR64-*main.T</code></pre>
+<p>好接下来的几个节点是我们真正感兴趣的部分：</p>
+<pre><code>AS l(16) 
+.   NAME-main.i l(16)main.I
+.   CONVIFACE l(16) main.I
+.   .   NAME-main.autotmp_0000 PTR64-*main.T</code></pre>
+<p>我们看到编译器把一个特殊节点<code>CONVIFACE</code>赋值给了<code>main.i</code>，这一步有一些意思，但是还是裹了一层薄纱，没有真正看到内涵。要搞清楚内涵信息我们得继续往下看编译器做了修订以后的版本(也就是标注为<code>after walk main</code>以后的片段)。</p>
+<hr>
+<h2 id="10">编译器是怎么修订赋值node的</h2>
+<p>下面我们可以看到编译器修订过程具体做了哪些猫腻：</p>
+<pre><code>AS-init
+.   AS l(16) 
+.   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   NAME-go.itab.*&quot;&quot;.T.&quot;&quot;.I l(16) PTR64-*uint8
+
+.   IF l(16) 
+.   IF-test
+.   .   EQ l(16) bool
+.   .   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   .   LITERAL-nil I(16) PTR64-*uint8
+.   IF-body
+.   .   AS l(16)
+.   .   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   .   CALLFUNC l(16) PTR64-*byte
+.   .   .   .   NAME-runtime.typ2Itab l(2) FUNC-funcSTRUCT-(FIELD-
+.   .   .   .   .   NAME-runtime.typ·2 l(2) PTR64-*byte, FIELD-
+.   .   .   .   .   NAME-runtime.typ2·3 l(2) PTR64-*byte PTR64-*byte, FIELD-
+.   .   .   .   .   NAME-runtime.cache·4 l(2) PTR64-*PTR64-*byte PTR64-*PTR64-*byte) PTR64-*byte
+.   .   .   CALLFUNC-list
+.   .   .   .   AS l(16) 
+.   .   .   .   .   INDREG-SP l(16) runtime.typ·2 G0 PTR64-*byte
+.   .   .   .   .   ADDR l(16) PTR64-*uint8
+.   .   .   .   .   .   NAME-type.*&quot;&quot;.T l(11) uint8
+
+.   .   .   .   AS l(16)
+.   .   .   .   .   INDREG-SP l(16) runtime.typ2·3 G0 PTR64-*byte
+.   .   .   .   .   ADDR l(16) PTR64-*uint8
+.   .   .   .   .   .   NAME-type.&quot;&quot;.I l(16) uint8
+
+.   .   .   .   AS l(16) 
+.   .   .   .   .   INDREG-SP l(16) runtime.cache·4 G0 PTR64-*PTR64-*byte
+.   .   .   .   .   ADDR l(16) PTR64-*PTR64-*uint8
+.   .   .   .   .   .   NAME-go.itab.*&quot;&quot;.T.&quot;&quot;.I l(16) PTR64-*uint8
+AS l(16) 
+.   NAME-main.i l(16) main.I
+.   EFACE l(16) main.I
+.   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T</code></pre>
+<p>从截取的输出看到，编译器首先给赋值节点加另一个初始化节点<code>AS-init</code>，在初始化节点<code>AS-init</code>里面，创建一个新的自动变量<code>autotmp_0003</code>，并且赋值为<code>go.itab.*&quot;&quot;.T.&quot;&quot;.I</code>，这一步后，就检查这个变量是否为nil<code>LITERAL-nil</code>，如果变量不为nil，则调用函数<code>runtime.typ2Itab</code>，并传递如下参数：</p>
+<p><code>NAME-type.*&quot;&quot;.T l(11)</code> 一个指向类型<code>main.T</code>的指针
+<code>NAME-type.&quot;&quot;.I l(16)</code> 一个指向类型<code>main.I</code>的指针
+以及<code>NAME-go.itab.*&quot;&quot;.T.&quot;&quot;.I l(16)</code> 一个指向<code>go.itab.*&quot;&quot;.T.&quot;&quot;.I</code>的变量</p>
+<p>从上面不难发现编译器创建了一个临时变量存储<code>main.T</code>转到<code>main.I</code>的类型转换结果。</p>
+<h2 id="11">深入老巢，观察gititab函数</h2>
+<p>我们先把the-fucking-code:<a href="https://golang.org/src/cmd/compile/internal/gc/builtin/runtime.go?h=typ2Itab#L63" title="typ2Itab">typ2Itab</a>列出来：</p>
+<pre><code>func typ2Itab(t *_type, inter *interfacetype, cache **itab) *itab {
+    tab := getitab(inter, t, false)
+    atomicstorep(unsafe.Pointer(cache), unsafe.Pointer(tab))
+    return tab
+}</code></pre>
+<p>擦。。。，上面的代码太简单了，所有事情其实都是给<a href="https://golang.org/src/runtime/iface.go?h=getitab#L22" title="getitab">getitab</a>干了，自己只是把结构存储到了cache里面。好接下来看getitab:</p>
+<pre><code>m = 
+    (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize, 0,
+    &amp;memstats.other_sys))
+    m.inter = interm._type = typ
+
+ni := len(inter.mhdr)
+nt := len(x.mhdr)
+j := 0
+for k := 0; k &lt; ni; k++ {
+    i := &amp;inter.mhdr[k]
+    iname := i.name
+    ipkgpath := i.pkgpath
+    itype := i._type
+    for ; j &lt; nt; j++ {
+        t := &amp;x.mhdr[j]
+        if t.mtyp == itype &amp;&amp; t.name == iname &amp;&amp; t.pkgpath == ipkgpath {
+            if m != nil {
+                *(*unsafe.Pointer)(add(unsafe.Pointer(&amp;m.fun[0]), uintptr(k)*ptrSize)) = t.ifn
+            }
+        }
+    }
+}</code></pre>
+<p>getitab函数非常大，这里只截取了笔者认为最有价值的部分。首先会申请内存存储返回的结果：</p>
+<pre><code>m = 
+    (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize, 0,
+    &amp;memstats.other_sys))
+    m.inter = interm._type = typ</code></pre>
+<p>这里调用的是一个很奇怪的函数申请的内存，为什么会调用这么一个东东，我们得看下<code>itab</code>结构体的定义：</p>
+<pre><code>type itab struct {
+    inter  *interfacetype
+    _type  *_type
+    link   *itab
+    bad    int32
+    unused int32
+    fun    [1]uintptr // variable sized
+}</code></pre>
+<p>结构体的最后一个变量<code>fun</code>是一个只有一个元素的数组，这里其实是一个可变长度的函数指针数组，存储了对应到interface定义的所有函数，Go的设计者这里是通过unsafe包提供的能力自己手动管理内存的，所以需要申请的内存大小原来的大小在加上interface定义的方法数减1乘以指针大小<code>unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*ptrSize</code>。</p>
+<p>接下来会看到两个嵌套loop, 第一个loop我们遍历interface的方法，为每个方法尝试找到在type里面对应的方法，用如下的代码判断方法是否相等：
+<code>if t.mtyp == itype &amp;&amp; t.name == iname &amp;&amp; t.pkgpath == ipkgpath</code>
+如果找到了我们就把函数指针存储到<code>fun</code>里面：
+<code>*(*unsafe.Pointer)(add(unsafe.Pointer(&amp;m.fun[0]), uintptr(k)*ptrSize)) = t.ifn</code></p>
+<p>笔者发现这里的一个优化点：在interfae和type的方法都是按照字母序排序好的情况下，这里的循环其可以O(n+m)的情况下完成，而不需要O(n*m){译者注：这里的n 和m对应到interface和type的方法数，也就意味着n和m都是很小的数，所以这里没太大必要做过度优化去牺牲可阅读性}。</p>
+<p>好时光倒转一下，我们继续看前面关于node-tree的解析的最后一部分：</p>
+<pre><code>AS l(16) 
+.   NAME-main.i l(16) main.I
+.   EFACE l(16) main.I
+.   .   NAME-main.autotmp_0003 l(16) PTR64-*uint8
+.   .   NAME-main.autotmp_0000 l(16) PTR64-*main.T</code></pre>
+<p>这里把一个<code>EFACE l(16)</code>的节点赋值给了<code>NAME-main.i</code>变量，而<code>EFACE l(16)</code>包含了一个<code>autotmp_0003</code>的引用，而且前面的分析我们也知道<code>autotmp_0003</code>是一个指向<code>itab</code>结构体的指针，存储了<code>untime.typ2Itab</code>返回值；同时<code>EFACE l(16)</code>还包含了<code>autotmp_0000</code>的引用，而这个变量存储的值就是<code>main.t</code>,所以<code>main.i</code>就已经关联了一个<code>itab</code>和<code>main.T</code>，就能访问相关的方法和变量了。也就是<code>main.i</code>其实是runtime包里面的<code>iface</code>的实例，<code>iface</code>结构体定义如下：</p>
+<pre><code>type iface struct {
+    tab  *itab
+    data unsafe.Pointer
+}</code></pre>
+<p>{译者注：好吧，看到这里，对于学过C++等多态语言的，不难类比到C++的多态机制，只是go的这里是动态多态，他的虚表itab是动态生成的, 同时把虚表单独拿出来和一个对象结合到一起变成一个iface，这样就提供了非常大的灵活性。}</p>
+<h2 id="12">接下来路在何方</h2>
+<p>通过前面的缀叙，我们还仅仅只是覆盖了go编译器和go运行时非常小的一部分，还有非常多的东西可以探讨。在本系列接下来的文章里面我们还会继续探讨：object文件，链接过程，重定向等。</p>
+
+<h1 id="-golang-object-part-3-the-linker-object-files-and-relocations-1-">深入浅出 Golang，第三部分：链接，重定向以及Object文件 [Part 3: The Linker, Object Files, and Relocations][1]</h1>
+<p>今天我们聊聊Go的链接器，Object文件，以及重定向。</p>
+<p>好，为什么我们需要关心上述的这些概念呢，这个道理其实也很简单，比如你要了解一个大项目，那么你首先肯定得把大项目分解成很多小的模块；然后你再搞清楚模块与模块之间的依赖关系，以及他们之间项目调用的约定。对于Go这个大项目来说，他可以分解成：编译器，链接器，运行时；然后编译器生成Object文件，链接器在这个基础上工作。我们今天这里主要讨论就是这一部分。</p>
+<hr>
+<h2 id="13">怎么生成Go的Object文件</h2>
+<p>我们来做一个实验，我们写一个超级简单的示例程序，看Go的编译器会生成什么样的Object文件。我们用如下的程序来做实验：</p>
+<pre><code>package main
+
+func main() {
+    print(1)
+}</code></pre>
+<p>是不是简单到你怀疑人生！好我们编译这个简单程序：</p>
+<pre><code>go tool 6g test.go</code></pre>
+<p>如果是Go1.5或者以上的版本可以执行：</p>
+<pre><code>go tool compile test.go</code></pre>
+<p>上面的命令会生成test.6的Object文件(如果是Go1.5以上会生成test.o的Object文件)，为了刺探这个Object文件的内部结构我们需要用到[goobj][2]库，这个库随着Go的源代码一起发布，主要用来检查Object文件格式是否正确。为了解释内部结构，笔者基于这个库写了一个小工具，用来打印Object文件内部结构信息，小工具的源代码可以在[这里][3]找到。
+我们先下载和安装这里需要用到的这个小工具(go1.4后加了[internal机制][6]，这个工具不能直接这样编译了)：</p>
+<pre><code>go get github.com/s-matyukevich/goobj_explorer</code></pre>
+<p>然后执行如下命令：</p>
+<pre><code>goobj_explorer -o test.6</code></pre>
+<p>好，你将在控制台里面看到<code>goob.Package</code>结构体。</p>
+<hr>
+<h2 id="14">详解Object文件</h2>
+<p>Object文件比较有意义的部分是Sym数组，这其实是一个符号表。应用程序里面定义所有符号信息都在这个表里面，包括定义的函数，全局变量，类型，常量等等。我们看一下关于main函数的符号(我们这里暂时把<code>Reloc</code>和<code>Func</code>这两个部分先省略，我们后续对这两部分再详细讨论)。</p>
+<pre><code>&amp;goobj.Sym{
+            SymID: goobj.SymID{Name:&quot;main.main&quot;, Version:0},
+            Kind:  1,
+            DupOK: false,
+            Size:  48,
+            Type:  goobj.SymID{},
+            Data:  goobj.Data{Offset:137, Size:44},
+            Reloc: ...,
+            Func:  ...,
+}</code></pre>
+<p>我们用一个表格对goobj.Sym的各个字段做一个说明：</p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SumID</td>
+<td>全局唯一的符号ID，由符号名和版本组成，版本用来区分同名的不同符号</td>
+</tr>
+<tr>
+<td>Kind</td>
+<td>表明符号属于什么类型，后续会进一步说明这个字段</td>
+</tr>
+<tr>
+<td>DupOK</td>
+<td>表明这个符号是否可以存在多个同名的</td>
+</tr>
+<tr>
+<td>Size</td>
+<td>符号的内存大小</td>
+</tr>
+<tr>
+<td>Type</td>
+<td>可以指向另外一个详细说明类型信息的符号，可以是空</td>
+</tr>
+<tr>
+<td>Data</td>
+<td>包含符号的二进制信息，不同类型的符号这个字段的内容解释是不一样的，如果是函数类型的符号，这里存储的是汇编代码，如果是字符串类型的符号，这个字段存储的是字符串的值</td>
+</tr>
+<tr>
+<td>Reloc</td>
+<td>包含重定向信息，后面详细说明...</td>
+</tr>
+<tr>
+<td>Func</td>
+<td>如果是函数类型的符号，这里存储的是函数的元信息</td>
+</tr>
+</tbody>
+</table>
+<p>所有不同类型的符号都以常量的形式定义在<code>goobj</code>包里面，可以在[这里][4]找到。这里我们截取一部分：</p>
+<pre><code>const (
+    _ SymKind = iota
+
+    // readonly, executable
+    STEXT
+    SELFRXSECT
+
+    // readonly, non-executable
+    STYPE
+    SSTRING
+    SGOSTRING
+    SGOFUNC
+    SRODATA
+    SFUNCTAB
+    STYPELINK
+    SSYMTAB // TODO: move to unmapped section
+    SPCLNTAB
+    SELFROSECT</code></pre>
+<p>从前面的代码段我们看到<code>main.main</code>符号的Kind是1，对应到<code>STEXT</code>符号类型，这个类型的符号包含的是可执行代码。好让我们来看一下<code>Reloc</code>数组，我们先列一下数组成员的结构体：</p>
+<pre><code>type Reloc struct {
+    Offset int
+    Size   int
+    Sym    SymID
+    Add    int
+    Type int
+}</code></pre>
+<p>上面的结构体的代表的操作是：把符号所在地址加上偏移量Add这个地方的内存复制到内存地址范围[Offset, Offset+Size]的地方,
+也就是[memmove][5]: <code>memmove(Offset, sym_addr+Add, Size)</code></p>
+<h2 id="15">理解 relocations</h2>
+<p>接下来我们用一个例子来说明relocations。首先我们在编译的时候带上一个<code>-S</code>的选项，让编译器帮我们打印出生成的相关汇编代码。
+    go tool 6g -S test.go
+    go tool compile -S test.go // Go1.5 or greater</p>
+<p>我们找到生成的汇编代码关于main函数的那一段：</p>
+<pre><code>&quot;&quot;.main t=1 size=48 value=0 args=0x0 locals=0x8
+    0x0000 00000 (test.go:3)    TEXT    &quot;&quot;.main+0(SB),$8-0
+    0x0000 00000 (test.go:3)    MOVQ    (TLS),CX
+    0x0009 00009 (test.go:3)    CMPQ    SP,16(CX)
+    0x000d 00013 (test.go:3)    JHI    ,22
+    0x000f 00015 (test.go:3)    CALL    ,runtime.morestack_noctxt(SB)
+    0x0014 00020 (test.go:3)    JMP    ,0
+    0x0016 00022 (test.go:3)    SUBQ    $8,SP
+    0x001a 00026 (test.go:3)    FUNCDATA    $0,gclocals·3280bececceccd33cb74587feedb1f9f+0(SB)
+    0x001a 00026 (test.go:3)    FUNCDATA    $1,gclocals·3280bececceccd33cb74587feedb1f9f+0(SB)
+    0x001a 00026 (test.go:4)    MOVQ    $1,(SP)
+    0x0022 00034 (test.go:4)    PCDATA    $0,$0
+    0x0022 00034 (test.go:4)    CALL    ,runtime.printint(SB)
+    0x0027 00039 (test.go:5)    ADDQ    $8,SP
+    0x002b 00043 (test.go:5)    RET    ,</code></pre>
+<p>在后续的博文里面我们会再次详解这一段汇编，并且尝试通过解析理解Go的运行时是怎么工作的。这个阶段我们对上述的汇编我们只关心这一句就可以了：</p>
+<pre><code>0x0022 00034 (test.go:4)    CALL    ,runtime.printint(SB)</code></pre>
+<p>这一条指令位于函数区偏移量为0x0022(十六进制)的位置,或者说是偏移量为00034(十进制)的位置，这一行指令他实际上的作用是调用运行时的函数<code>runtime.printint</code>，这里的问题是编译器在编译期间其实是不知道运行时函数<code>runtime.printint</code>的真正地址的，这个函数是位于运行时的Object文件里面，当前编译的文件肯定是不知道这个函数地址，在这种情况下我们就用到了重定向技术，接下来的代码段正是对函数<code>runtime.printint</code>这个的重定向，笔者从goobj_explorer工具的汇编里面拷贝过来的。</p>
+<pre><code>                {
+                    Offset: 35,
+                    Size:   4,
+                    Sym:    goobj.SymID{Name:&quot;runtime.printint&quot;, Version:0},
+                    Add:    0,
+                    Type:   3,
+                },</code></pre>
+<p>上面的重定向告诉链接器，用符号<code>Sym:    goobj.SymID{Name:&quot;runtime.printint&quot;, Version:0}</code>的地址加上偏移量<code>Add:    0</code> 替换当前Object文件偏移量为<code>Offset: 35</code>开始的<code>Size:   4</code>的内容，这里是35而不是前面跳到的34的偏移量是，因为第34字节是一个字节的call指令，第35字节才是call的函数地址。</p>
+<hr>
+<h2 id="16">链接器怎么执行重定向呢</h2>
+<p>经过上面的解析，我们基本理解了重定向这个。这里我们对整个过程做一下梳理：</p>
+<ol>
+<li>链接器从main包开始收集所有关联到的相关代码里面的需要重定向的符号，把这个放入一个巨大的二进制的数组结构里面</li>
+<li>链接器计算每一个符号在当前镜像里面的偏移量</li>
+<li>执行重定向操作，把符号里面相关真正的地址和数据复制到响应的位置</li>
+<li>链接器准备pe头需要的所有信息，然后生成可执行的二进制镜像文件</li>
+</ol>
+<h2 id="17">理解TLS(thread-local-storage)</h2>
+<p>在前面打印出来main函数的符号表里面，细心的读者可能注意到一个比较奇怪的重定向，他没有对应到任何函数调用，连符号也是一个空的<code>Sym:    goobj.SymID{}</code>:</p>
+<pre><code>                {
+                    Offset: 5,
+                    Size:   4,
+                    Sym:    goobj.SymID{},
+                    Add:    0,
+                    Type:   9,
+                },</code></pre>
+<p>那么上面的重定向是干啥的？我们看到他的偏移量是5，替换4个字节的数据，查看这个偏移量对应的汇编指令为：</p>
+<pre><code>0x0000 00000 (test.go:3)    MOVQ    (TLS),CX</code></pre>
+<p>我们也可以观察到这条指令的偏移量是0，然后下一条指令的偏移量就已经是9了，所以这一条指令占据了9个字节的空间，我们初步的估计就是他与TLS有关，但是TLS具体做了一些什么事情呢？</p>
+<p>TLS的全称是[线程局部存储][7]，很多编程语言里面都有这个概念，这个简单介绍就是线程局部存储，定义一个变量，这个变量在每个线程都存在一个单独的实例。</p>
+<p>在Go语言里面，用TLS存储了当前Goroutine的环境变量G结构体的指针，链接器对这个指针是感知的，上面的偏移量为0的指令就是把这个结构体的指针放到寄存器CX里面，TLS的实现在不同的架构上他的实现是不一样的，比如在AMD64处理器上，这个不是指针会被存储到FS寄存器，那么前面的指令就会变成<code>0x0000 00000 (test.go:3)    MOVQ    (TLS),FS</code>。</p>
+<p>这里我们列举所有重定向类型，来结束我们关于重定向的讨论：</p>
+<pre><code>// Reloc.type
+enum
+{
+    R_ADDR = 1,
+    R_SIZE,
+    R_CALL, // relocation for direct PC-relative call
+    R_CALLARM, // relocation for ARM direct call
+    R_CALLIND, // marker for indirect call (no actual relocating necessary)
+    R_CONST,
+    R_PCREL,
+    R_TLS,
+    R_TLS_LE, // TLS local exec offset from TLS segment register
+    R_TLS_IE, // TLS initial exec offset from TLS base pointer
+    R_GOTOFF,
+    R_PLT0,
+    R_PLT1,
+    R_PLT2,
+    R_USEFIELD,
+};</code></pre>
+<p>上面的R_CALL和R_TLS就是我们讨论里面涉及到的两个重定向类型。</p>
+<h2 id="18">进一步深挖Object文件</h2>
+<p>下一个主题还是讨论Object文件，下一节会展示更多详细的信息，为后续理解Go的运行时提供更全面的背景知识。</p>
+<p>[1] <a href="http://blog.altoros.com/golang-internals-part-3-the-linker-and-object-files.html">http://blog.altoros.com/golang-internals-part-3-the-linker-and-object-files.html</a> &quot;The Linker, Object Files, and Relocations&quot;
+[2] <a href="https://github.com/golang/go/tree/master/src/cmd/internal/goobj">https://github.com/golang/go/tree/master/src/cmd/internal/goobj</a> &quot;goobj&quot;
+[3] <a href="https://github.com/s-matyukevich/goobj_explorer">https://github.com/s-matyukevich/goobj_explorer</a> &quot;goobj_explorer&quot;
+[4] <a href="https://github.com/golang/go/blob/master/src/cmd/internal/goobj/read.go#L30">https://github.com/golang/go/blob/master/src/cmd/internal/goobj/read.go#L30</a> &quot;Sym Kind&quot;
+[5] <a href="http://man7.org/linux/man-pages/man3/memmove.3.html">http://man7.org/linux/man-pages/man3/memmove.3.html</a> &quot;memmove&quot;
+[6] <a href="http://golang.org/s/go14internal">http://golang.org/s/go14internal</a> &quot;internal&quot;
+[7] <a href="https://en.wikipedia.org/wiki/Thread-local_storage">https://en.wikipedia.org/wiki/Thread-local_storage</a> &quot;thread-local-storage&quot;</p>
+
+<h1 id="-golang-object-part-4-object-files-and-function-metadata-1-">深入浅出 Golang，第四部分：Object文件以及函数元信息 <a href="http://blog.altoros.com/golang-part-4-object-files-and-function-metadata.html" title="Part 4: Object Files and Function Metadata">Part 4: Object Files and Function Metadata</a></h1>
+<p>今天我们详细探讨Go里面的<code>Func</code>这个结构，以及涉及一下Go的垃圾回收工作原理。
+这一篇作为<a href="https://github.com/JerryZhou/golang-doc/blob/master/Golang-Internals/Part-3.The.Linker.Object.Files.and.Relocations.md" title="Part-3.The.Linker.Object.Files.and.Relocations">Part-3.The.Linker.Object.Files.and.Relocations</a> 的姊妹篇，我们也会用同一个示例程序来探讨，如果没有阅读过第三篇，强烈建议先过一下第三篇文章。</p>
+<h2 id="19">函数结构体</h2>
+<p>第三篇文章后，应该对重定向的基本原理已经了解。然后我们来观察下main函数的符号定义：</p>
+<pre><code>Func: &amp;goobj.Func{
+    Args:    0,
+    Frame:   8,
+    Leaf:    false,
+    NoSplit: false,
+    Var:     {
+    },
+    PCSP:   goobj.Data{Offset:255, Size:7},
+    PCFile: goobj.Data{Offset:263, Size:3},
+    PCLine: goobj.Data{Offset:267, Size:7},
+    PCData: {
+        {Offset:276, Size:5},
+    },
+    FuncData: {
+        {
+            Sym:    goobj.SymID{Name:&quot;gclocals·3280bececceccd33cb74587feedb1f9f&quot;, Version:0},
+         Offset: 0,
+     },
+     {
+         Sym:    goobj.SymID{Name:&quot;gclocals·3280bececceccd33cb74587feedb1f9f&quot;, Version:0},
+               Offset: 0,
+           },
+       },
+       File: {&quot;/home/adminone/temp/test.go&quot;},
+   },</code></pre>
+<p>你可以认为上面的结构体就是编译器为main函数生成的Metadata，这个Metadata是Go运行时可以访问的(当然实际上函数的Metadata没有这么多字段，下面马上就会看到具体定义)。这里有一篇<a href="https://docs.google.com/document/d/1lyPIbmsYbXnpNj57a261hgOYVpNRcgydurVQIyZOz_o/pub" title="Func">文章</a>详细介绍了这个结构体的每一个字段的含义。接下来我们跳过这部分说明，直接介绍运行时是怎么使用这个Metadata的。
+在运行时里面上面的符号定义会对应到一个如下的结构体：</p>
+<pre><code>type _func struct {
+    entry   uintptr // start pc
+    nameoff int32   // function name
+
+    args  int32 // in/out args size
+    frame int32 // legacy frame size; use pcsp if possible
+
+    pcsp      int32
+    pcfile    int32
+    pcln      int32
+    npcdata   int32
+    nfuncdata int32
+}</code></pre>
+<p>从上面的定义可以清晰看到，并没有把编译器生成的所有字段映射到运行时里面，有一些字段只供链接器使用。这里比较有意义的字段是：pcsp、pcfile、pcln，在真正遇到<a href="https://en.wikipedia.org/wiki/Program_counter" title="IP/IAR">指令运算-指令寄存器</a>执行的时候，上述的字段就会翻译成栈指针，文件名，以及相应的行号。一个很常见的情形就是发生panic的时候，运行时得知道当前汇编指令对应的函数，行号，以及相应的文件名，运行时就是通过当前的指令寄存器得到相应的函数名和行号，然后通过回溯字段pcsp获取整个调用栈。
+好，问题来了，我们是怎么通过指令寄存器获取行号这些信息的？为了回答这个问题，我们再回来看下生成的汇编代码，以及行号信息是怎么存储在Object文件里面的：</p>
+<pre><code>    0x001a 00026 (test.go:4)    MOVQ    $1,(SP)
+    0x0022 00034 (test.go:4)    PCDATA    $0,$0
+    0x0022 00034 (test.go:4)    CALL    ,runtime.printint(SB)
+    0x0027 00039 (test.go:5)    ADDQ    $8,SP
+    0x002b 00043 (test.go:5)    RET    ,</code></pre>
+<p>从上面的汇编代码我们看到指令寄存器从<code>00026</code>到<code>00038</code>对应的行号是<code>test.go:4</code>，从<code>00039</code>到下一个函数调用对应的是<code>test.go:5</code>，简化这个对应关系，我们存储下面的一个map：</p>
+<pre><code>26 - 4
+39 - 5
+…</code></pre>
+<p>上面的过程基本也是编译器做的事情。字段<code>pcln</code>存储的是与当前函数的起始指令的偏移量，再加上下一个函数的起始指令的偏移量，我们就可以用二分查找找到给定的指令寄存器对应的行号。
+在Go里面很多地方都应用了上面的map机制，不仅仅通过建立一个map，建立指令寄存器与行号的关系，可以通过上述的机制让指令寄存器映射到任何整数。汇编代码里面的<code>PCDATA</code>就是用来干这个事情的。每一次链接器发现了下面的指令：</p>
+<pre><code>0x0022 00034 (test.go:4)    PCDATA  $0,$0</code></pre>
+<p>链接器不会为上述的汇编生成任何要执行的指令，相反他会当前指令的第二个参数和当前的指令寄存器建立一个上述的映射关系，而指令的第一个参数表示的就是map的类型，通过传递不同的第一个参数可以建立很多运行时可以感知的映射关系。</p>
+<h2 id="20">垃圾回收是怎么利用函数的Metadata的呢？</h2>
+<p>最后一个Func-Metadata里面需要说明的是<code>FuncData</code>数组，它为GC准备了一些必要的信息。Go的GC采用的是<a href="http://www.brpreiss.com/books/opus5/html/page424.html" title="Mark-and-Sweep Garbage Collection">Mark-and-Sweep</a>算法，这个算法分为两个阶段，第一个阶段给所有能达到的对象做标记(mark)，第二个阶段释放(sweep)所有没有标记的对象。</p>
+<p>所以算法的第一阶段就是从几个已知的地方开始扫描所有对象，这些地方包括：全局变量，寄存器，栈帧上，以及已经标记为可达的对象的成员变量上。如果你仔细想想，你也会发现这个扫描过程是一个非常棘手的问题，怎么扫描栈上的指针，怎么来区分是指针还是普通变量等等，这个时候就需要到一些辅助信息了。
+编译器会为每个函数生成两个位图，第一个位图用来跟踪函数的参数里面栈帧上的那些指针变量(堆变量)；第二个位图用来跟踪函数体内部栈帧上的指针变量(堆变量)。Garbage-Collector(GC)就可以用上述的两个位图执行扫描操作。</p>
+<p>这里我们提到了两种附加数据，类似这里<code>PCDATA, FUNCDATA</code>的附加数据是由Go编译器生成的伪汇编指令：</p>
+<pre><code>0x001a 00026 (test.go:3)    FUNCDATA    $0,gclocals·3280bececceccd33cb74587feedb1f9f+0(SB)</code></pre>
+<p>上面指令的第一个参数表面是参数位图还是函数体局部变量位图，第二个参数就是真正的包含GC-Mask(位图)的隐藏变量。</p>
+<h2 id="21">还有啥？？</h2>
+<p>在接下来的篇幅中，我们会探讨Glang的启动引导过程，这个对于理解Go的运行时机制也是非常关键的。</p>
+
+<h1 id="-golang-part-5-the-runtime-bootstrap-process-1-">深入浅出 Golang，第五部分：运行时的启动过程 <a href="http://blog.altoros.com/golang-internals-part-5-runtime-bootstrap-process.html" title="Part 5: the Runtime Bootstrap Process">Part 5: the Runtime Bootstrap Process</a></h1>
+<p>搞清楚Golang-Runtime的启动引导过程是理解Golang-Runtime的工作机制非常关键的一步。如果想把Golang玩弄于鼓掌之间，就必须搞清楚它的运行时。所以&lt;深入浅出Golang&gt;这个系列的第五部分，我们就来重点探讨Golang-Runtime以及它的启动引导过程。</p>
+<p>这一部分我们会着重三个方面的探讨：</p>
+<ol>
+<li>Golang 的启动引导过程</li>
+<li>resizable stacks: 动态栈的实现</li>
+<li>internal TLS: 内部线程局部存储的实现</li>
+</ol>
+<p>注意：本文会涉及到一些Go-Assemble-Code, 也就要求你对Golang的汇编应该具备基本的了解。如果不了解,可以先去参考<a href="https://golang.org/doc/asm" title="Go&#39;s Assembler">这篇文章</a>，当然如果不习惯E文，也还是有<a href="http://blog.rootk.com/post/golang-asm.html" title="golang-asm">译文</a>可读的。</p>
+<h2 id="22">从程序的入口开始</h2>
+<p>我们先写一个简单的测试程序，编译一下，看开始执行一个Go程序，最开始调用的函数或者说执行的代码是到底神马。我们用如下的测试程序来做实验：</p>
+<pre><code>package main
+
+func main() {
+    print(123)
+}</code></pre>
+<p>然后我们对这个程序做编译链接操作，生成正在的可执行文件。</p>
+<pre><code>go tool 6g test.go
+go tool 6l test.6</code></pre>
+<p>{对于Go1.5以上: <code>go tool compile test.go</code>  和 <code>go tool link test.o</code>}</p>
+<p>然后我们用objdump工具来看下这个执行镜像的pe头，对于没有这个工具的Windows或者Mac平台用户你就直接跳过这一步，查看笔者这里贴出来的结果就好。</p>
+<pre><code>objdump -f 6.out</code></pre>
+<p>{对于Mac用户，其实可以<code>brew install binutils</code>，里面有带一个<code>gobjdump -f test.out</code>}
+通过上面的命令应该可以得到如下输出：</p>
+<pre><code>6.out:     file format elf64-x86-64
+architecture: i386:x86-64, flags 0x00000112:
+EXEC_P, HAS_SYMS, D_PAGED
+start address 0x000000000042f160</code></pre>
+<p>通过上面的操作，我们知道了起始地址，那我们通过如下命令把执行文件编译到汇编代码：</p>
+<pre><code>objdump -d 6.out &gt; disassemble.txt</code></pre>
+<p>{对于Go1.5以上的用户，其实Golang自带了objdump工具：<code>go tool objdump test.out</code>}
+然后我们打开反编译的汇编代码，查找起始地址：<code>42f160</code>，然后我们得到起始地址的代码是：</p>
+<pre><code>000000000042f160 &lt;_rt0_amd64_linux&gt;:
+  42f160:    48 8d 74 24 08               lea    0x8(%rsp),%rsi
+  42f165:    48 8b 3c 24                  mov    (%rsp),%rdi
+  42f169:    48 8d 05 10 00 00 00     lea    0x10(%rip),%rax        # 42f180 &lt;main&gt;
+  42f170:    ff e0                            jmpq   *%rax</code></pre>
+<p>好了，我们发现了在笔者的操作系统上的入口函数是：<code>_rt0_amd64_linux</code></p>
+<h2 id="23">启动那一坨</h2>
+<p>现在我们在Go-Runtime的源代码里面查找入口函数，对于笔者的情况入口函数在文件<a href="https://golang.org/src/runtime/rt0_linux_amd64.s" title="rt0_linux_amd64"><code>rt0_linux_amd64.s</code></a>里面。仔细看的话，你会在当前源代码目录下面发现很多rt0<em>[OS]</em>[architecture].s 的文件，这些就对应到不同系统，不同架构的入口函数。好，我们来仔细瞧瞧这个<a href="https://golang.org/src/runtime/rt0_linux_amd64.s" title="rt0_linux_amd64"><code>rt0_linux_amd64.s</code></a>文件：</p>
+<pre><code>TEXT _rt0_amd64_linux(SB),NOSPLIT,$-8
+    LEAQ     8(SP), SI // argv
+    MOVQ     0(SP), DI // argc
+    MOVQ     $main(SB), AX
+    JMP    AX
+
+TEXT main(SB),NOSPLIT,$-8
+    MOVQ     $runtime·rt0_go(SB), AX
+    JMP    AX</code></pre>
+<p><code>_rt0_amd64_linux</code>函数非常简单，把参数<code>argv</code>和<code>argc</code>放到寄存器<code>SI</code>和<code>DI</code>里面，然后调用了<code>main</code> 函数，同时我们也看到<code>argv</code>和<code>argc</code>是位于<code>SP</code>上的，也就说是属于栈变量，可以通过<code>SP</code>寄存器访问到。后续的<code>main</code>函数也非常简单，只是调用了<code>runtime·rt0_go</code>函数。好<code>runtime·rt0_go</code>函数相对复杂一些了，我们把这个函数拆成几个部分来解析。</p>
+<p><code>runtime·rt0_go</code>的第一部分：</p>
+<pre><code>MOVQ DI, AX        // argc
+MOVQ     SI, BX        // argv
+SUBQ     $(4*8+7), SP        // 2args 2auto
+ANDQ     $~15, SP
+MOVQ     AX, 16(SP)
+MOVQ     BX, 24(SP)</code></pre>
+<p>这里我前面存在<code>DI</code>和<code>SI</code>里面的<code>argv</code>和<code>argc</code>放到<code>AX</code>和<code>BX</code>里面去，然后我们腾出4个变量栈空间，同时把腾出的空间按照16字节对齐，然后把刚才的<code>AX</code>和<code>BX</code>里面的参数放到栈上。</p>
+<p><code>runtime·rt0_go</code>的第二部分比第一部分要复杂一些了：</p>
+<pre><code>// create istack out of the given (operating system) stack.
+// _cgo_init may update stackguard.
+MOVQ        $runtime·g0(SB), DI
+LEAQ        (-64*1024+104)(SP), BX
+MOVQ        BX, g_stackguard0(DI)
+MOVQ        BX, g_stackguard1(DI)
+MOVQ        BX, (g_stack+stack_lo)(DI)
+MOVQ        SP, (g_stack+stack_hi)(DI)</code></pre>
+<p>首先把全局变量<code>runtime·g0</code>放到<code>DI</code>寄存器，这个变量定义在<code>proc1.go</code>文件里面，是一个<code>runtime.g</code>类型指针，相信看过<a href="https://github.com/JerryZhou/golang-doc/blob/master/Golang-Internals/Part-3.The.Linker.Object.Files.and.Relocations.md" title="Part-3.The.Linker.Object.Files.and.Relocations">Part-3</a>对这个类型应该不陌生，系统会为每一个goroutine创建一个上下文，你应该也能猜到这个就是第一个gorountine的上下文，也就类似于主线程的线程上下文。后面的汇编我们初始化<code>runtime.g0</code>的各个成员变量，在汇编里面<code>stack_lo</code>和<code>stack_hi</code>这两个大家要弄清楚他们的含义，他们是当前goroutine的栈的起始地址和结束地址，汇编里面还有两个<code>g_stackguard0</code>和<code>g_stackguard1</code>变量，他们分别是搞什么黑科技的呢？要搞清楚这两个变量，我们要要先暂停<code>runtime·rt0_go</code>函数的探讨，然后专门讨论一下Go的真正黑科技<code>resizable stacks</code>动态栈。</p>
+<h2 id="24">实现动态栈<code>resizable stacks</code></h2>
+<p>Go语言使用一项叫做动态栈的技术，每次一个goroutine启动的时候只会分配一个很小的栈<code>_StackMin = 2048</code>，这个栈的大小会在每次函数调用的时候做检查，当达到一定阀值的时候，就调整栈的大小。为了详细了解这个过程我们继续对前面的示例程序做编译<code>go tool compile -S test.go</code>，生成相关汇编代码。编译后main函数对应的汇编代码应该是这样的：</p>
+<pre><code>&quot;&quot;.main t=1 size=48 value=0 args=0x0 locals=0x8
+    0x0000 00000 (test.go:3)    TEXT    &quot;&quot;.main+0(SB),$8-0
+    0x0000 00000 (test.go:3)    MOVQ     (TLS),CX
+    0x0009 00009 (test.go:3)    CMPQ     SP,16(CX)
+    0x000d 00013 (test.go:3)    JHI    ,22
+    0x000f 00015 (test.go:3)    CALL    ,runtime.morestack_noctxt(SB)
+    0x0014 00020 (test.go:3)    JMP    ,0
+    0x0016 00022 (test.go:3)    SUBQ        $8,SP</code></pre>
+<p>首先我们把TLS(前面<a href="https://github.com/JerryZhou/golang-doc/blob/master/Golang-Internals/Part-3.The.Linker.Object.Files.and.Relocations.md" title="Part-3.The.Linker.Object.Files.and.Relocations">Part-3</a>已经对TLS做过说明)里面的变量放到寄存器<code>CX</code>。我们知道TLS里面的变量存储的是一个指向<code>runtime.g</code>类型的指针，然后我们比较<code>SP</code>栈指针与<code>runtime.g</code>结构体偏移为16字节的变量，也就是比较栈栈指针和<code>runtime.g.stackguard0</code>字段。
+这个就是进行栈大小比较的相关代码，这里我们检查当前栈是否达到了给定的阀值，如果空间不够则调用函数<code>runtime.morestack_noctxt</code>获取更多空间，然后跳转到<code>JMP    ,0</code>继续做栈空间的检查。注意：关于顶部的一段描述<code>TEXT    &quot;&quot;.main+0(SB),$8-0</code>这里其实已经说明了函数对栈空间的要求，<code>$8-0</code>是说函数体的栈空间需求是8个字节，函数的参数包含返回值对栈的空间需求是0。
+这里可以进一步查看一下<a href="https://github.com/golang/go/blob/master/src/runtime/stack.go" title="stack">stack.go</a>的具体Layout：</p>
+<pre><code>// Stack frame layout
+//
+// (x86)
+// +------------------+
+// | args from caller |
+// +------------------+ &lt;- frame-&gt;argp
+// |  return address  |
+// +------------------+
+// |  caller&#39;s BP (*) | (*) if framepointer_enabled &amp;&amp; varp &lt; sp
+// +------------------+ &lt;- frame-&gt;varp
+// |     locals       |
+// +------------------+
+// |  args to callee  |
+// +------------------+ &lt;- frame-&gt;sp
+//
+// (arm)
+// +------------------+
+// | args from caller |
+// +------------------+ &lt;- frame-&gt;argp
+// | caller&#39;s retaddr |
+// +------------------+ &lt;- frame-&gt;varp
+// |     locals       |
+// +------------------+
+// |  args to callee  |
+// +------------------+
+// |  return address  |
+// +------------------+ &lt;- frame-&gt;sp</code></pre>
+<p>以及 stack的定义：</p>
+<pre><code>// Stack describes a Go execution stack.
+// The bounds of the stack are exactly [lo, hi),
+// with no implicit data structures on either side.
+type stack struct {
+    lo uintptr
+    hi uintptr
+}</code></pre>
+<p>知道栈顶指针指向区间段[lo, hi)，已经使用的空间可以通过<code>used := old.hi - gp.sched.sp</code>计算得到，那么当前栈的空闲空间是<code>space := gp.stackAlloc-used</code>，但可被使用的空闲空间其实是要除掉一部分系统保留区域<code>StackGuard</code>，也就是说栈的阀值：<code>runtime.g.stackguard0 == runtime.stack.lo+StackGuard</code>。其实关于栈的阀值还有一个是<code>runtime.g.stackguard1</code>他是用于cgo里面动态调整栈用的，具体的用法跟这里类似。关于调整栈大小的函数<code>runtime.morestack_noctxt</code>其实也是一个值得说一说的函数，后续篇幅中我们再来聊这个，我们这里抓紧回到主线继续讨论启动引导过程。</p>
+<h2 id="25">继续Go的Bootstrapping过程</h2>
+<p>我们看<code>runtime.rt0_go</code>函数的第三部分：</p>
+<pre><code>    // find out information about the processor we&#39;re on
+    MOVQ    $0, AX
+    CPUID
+    CMPQ    AX, $0
+    JE    nocpuinfo
+
+    // Figure out how to serialize RDTSC.
+    // On Intel processors LFENCE is enough. AMD requires MFENCE.
+    // Don&#39;t know about the rest, so let&#39;s do MFENCE.
+    CMPL    BX, $0x756E6547  // &quot;Genu&quot;
+    JNE    notintel
+    CMPL    DX, $0x49656E69  // &quot;ineI&quot;
+    JNE    notintel
+    CMPL    CX, $0x6C65746E  // &quot;ntel&quot;
+    JNE    notintel
+    MOVB    $1, runtime·lfenceBeforeRdtsc(SB)
+notintel:
+
+    MOVQ    $1, AX
+    CPUID
+    MOVL    CX, runtime·cpuid_ecx(SB)
+    MOVL    DX, runtime·cpuid_edx(SB)
+nocpuinfo:</code></pre>
+<p>这一部分对于理解整个Go的启动引导过程不是非常关键，而且汇编里面的注释也基本进行了有效的自说明，我们这里只是单纯过一遍。代码开始部分主要是找出当前的CPU架构，如果是Intel架构，则设置变量<code>runtime·lfenceBeforeRdtsc</code>为1，这个变量主要是用在函数<code>runtime·cputicks</code>里面，在这个函数里面根据这个变量用不同的汇编代码去获取CPU的<code>ticks</code>，后面的汇编代码则执行了一个汇编指令<code>CPUID</code>然后把结果保存在<code>runtime.cpuid_ecx</code>和<code>runtime.cpuid_edx</code>里面，这里存储的数值主要是用来根据不同的cpu架构选择我们使用什么样的hash算法。</p>
+<p>继续探索<code>runtime.rt0_go</code>函数的第四部分：</p>
+<pre><code>// if there is an _cgo_init, call it.
+MOVQ    _cgo_init(SB), AX
+TESTQ    AX, AX
+JZ    needtls
+// g0 already in DI
+MOVQ    DI, CX    // Win64 uses CX for first parameter
+MOVQ    $setg_gcc&lt;&gt;(SB), SI
+CALL    AX
+
+// update stackguard after _cgo_init
+MOVQ    $runtime·g0(SB), CX
+MOVQ    (g_stack+stack_lo)(CX), AX
+ADDQ    $const__StackGuard, AX
+MOVQ    AX, g_stackguard0(CX)
+MOVQ    AX, g_stackguard1(CX)
+
+CMPL    runtime·iswindows(SB), $0
+JEQ ok</code></pre>
+<p>第四部分是只有开启了<code>cgo</code>支持的情况下才会执行，好<code>cgo</code>又是一个比较独立的主题，在后面的讨论中我们会单独探讨。这里我们还是抓主线，搞清楚Bootstrapping过程，所以我们这里依然跳过这一部分。</p>
+<p>来到<code>runtime.rt0_go</code>函数的第五部分，这一部分主要是关于初始化TLS的：</p>
+<pre><code>needtls:
+    // skip TLS setup on Plan 9
+    CMPL    runtime·isplan9(SB), $1
+    JEQ ok
+    // skip TLS setup on Solaris
+    CMPL    runtime·issolaris(SB), $1
+    JEQ ok
+
+    LEAQ    runtime·tls0(SB), DI
+    CALL    runtime·settls(SB)
+
+    // store through it, to make sure it works
+    get_tls(BX)
+    MOVQ    $0x123, g(BX)
+    MOVQ    runtime·tls0(SB), AX
+    CMPQ    AX, $0x123
+    JEQ 2(PC)
+    MOVL    AX, 0    // abort</code></pre>
+<p>前面我们提到过好几次TLS(thread-local-storage)，好这里我们将直面TLS的实现问题。</p>
+<h2 id="26">TLS的实现细节</h2>
+<p>前面关于tls的汇编代码里面，如果过滤一下，我们不难发现真正干事情应该就只有如下两行汇编：</p>
+<pre><code>    LEAQ        runtime·tls0(SB), DI
+    CALL        runtime·settls(SB)</code></pre>
+<p>其他汇编指令都是用于检测系统架构是否支持tls，如果不支持则跳过这部分或者如果支持，则检查tls环境是否工作正常。上面真正干事情的两行汇编第一行<code>LEAQ        runtime·tls0(SB), DI</code>把<code>runtime.tls0</code>存入<code>DI</code>寄存器，第二行<code>CALL        runtime·settls(SB)</code>调用了一个函数<code>runtime.settls</code>。真正的猫腻都在这个函数里面了，我们继续深入函数：</p>
+<pre><code>// set tls base to DI
+TEXT runtime·settls(SB),NOSPLIT,$32
+    ADDQ        $8, DI    // ELF wants to use -8(FS)
+
+    MOVQ        DI, SI
+    MOVQ        $0x1002, DI    // ARCH_SET_FS
+    MOVQ        $158, AX    // arch_prctl
+    SYSCALL
+    CMPQ        AX, $0xfffffffffffff001
+    JLS        2(PC)
+    MOVL        $0xf1, 0xf1  // crash
+    RET</code></pre>
+<p>从汇编代码我们容易看到，它其实主要是用参数<code>ARCH_SET_FS</code>，调用了一个系统函数<code>arch_prctl</code>，而这个系统调用其实是设置<code>FS</code>段寄存器的基址，对应到我们这里的情形，我们设置TLS指向<code>runtime.tls0</code>变量。
+是否还记得前面我们讨论<code>main</code>函数的时候，开始有一段这样的汇编：</p>
+<pre><code>0x0000 00000 (test.go:3)    MOVQ        (TLS),CX</code></pre>
+<p>前面我们说过，这个指令他会把一个指向<code>runtime.g</code>的指针移动到寄存器<code>CX</code>里面，而这个指针正是当前goroutine的上下文，结合前面的说明，我们能基本猜测到上面的伪汇编会翻译成什么样的机器代码，我们依然从前面解析的<code>disassemble.txt</code>文件里面去查证我们的猜测，我们找到<code>main.main</code>这个函数，它的第一条机器指令是：</p>
+<pre><code>400c00:       64 48 8b 0c 25 f0 ff    mov    %fs:0xfffffffffffffff0,%rcx</code></pre>
+<p>上面机器指令里面的冒号代表的是段寻址，也就是我们的<code>runtime.g</code>的指针位于段基址，我们通过访问端基址就可以得到当前的tls上下文，关于段寻址更多详细的背景知识可以阅读<a href="http://thestarman.pcministry.com/asm/debug/Segments.html" title="Segments:OFFSET-Addressing">这里</a>。</p>
+<h2 id="27">继续Bootstrapping过程</h2>
+<p>函数<code>runtime.rt0_go</code>函数还剩下两部分，我们继续看接下来的：</p>
+<pre><code>ok:
+    // set the per-goroutine and per-mach &quot;registers&quot;
+    get_tls(BX)
+    LEAQ        runtime·g0(SB), CX
+    MOVQ        CX, g(BX)
+    LEAQ        runtime·m0(SB), AX
+
+    // save m-&gt;g0 = g0
+    MOVQ        CX, m_g0(AX)
+    // save m0 to g0-&gt;m
+    MOVQ        AX, g_m(CX)</code></pre>
+<p>先把tls的地址放到BX寄存器，然后把<code>runtime.g</code>的指针保持到tls里面去，然后继续初始化<code>runtime.m0</code>，如果<code>runtime.g0</code>代表的主goroutine，那么<code>runtime.m0</code>代表就是主线程了。后面的文章我们可以对<code>runtime.g0</code>和<code>runtime.m0</code>的结构体做详细的解读。</p>
+<p>函数<code>runtime.rt0_go</code>的最后一部分依然是初始化相关参数，并调用一些其他的函数，关于启动引导过程，我们已经讨论很大一部分了，我们先花些时间消化一下，我们把这最后的一部分拿到下一章节再单独探讨。</p>
+<h2 id="28">还有啥？</h2>
+<p>经过前面的探讨，我们知道了动态栈是怎么实现的，我们也搞清楚了tls的实现，关于启动引导过程，还剩下最后一部分，我们下一节马上探讨这个。</p>
+
+<h1 id="-golang-part-6-bootstrapping-and-memory-allocator-initialization-1-">深入浅出 Golang，第五部分：启动过程以及内存分配器的初始化 <a href="http://blog.altoros.com/golang-internals-part-6-bootstrapping-and-memory-allocator-initialization.html" title="Part 6: Bootstrapping and Memory Allocator Initialization">Part 6: Bootstrapping and Memory Allocator Initialization</a></h1>
+<p>本文关注的依然是启动过程，了解整个启动过程对理解Golang运行时非常关键的。前面的小节已经讨论了一部分，这里讨论剩下的部分，这一部分会有非常多的运行时函数调用，我们会对一些重点函数进行讲解。</p>
+<h2 id="29">启动序列</h2>
+<p>上一小节关于<code>runtime.rt0_go</code>函数我们还剩下一小节：</p>
+<pre><code>CLD                         // convention is D is always left cleared
+CALL    runtime·check(SB)
+
+MOVL    16(SP), AX          // copy argc
+MOVL    AX, 0(SP)
+MOVQ    24(SP), AX          // copy argv
+MOVQ    AX, 8(SP) 
+CALL    runtime·args(SB)
+CALL    runtime·osinit(SB)
+CALL    runtime·schedinit(SB)</code></pre>
+<p>第一个汇编指令<code>CLD</code>是清除方向寄存器<code>FLAGS</code>，<a href="https://en.wikipedia.org/wiki/Direction_flag" title="Direction_flag">方向寄存器</a>控制字符串的处理方式。第二条指令是调用了一个函数<code>runtime.check</code>，这个函数主要是Golang內建的类型int、string等做一些必要的校验，如果失败就会<code>panic</code>，这个函数对于整个过程也不是非常关键，我们不展开，可以在这个<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/runtime1.go#L136" title="check">地方</a>了解到详细的内容。后面部分的汇编主要就是初始化命令行参数，并调用了几个有些意思的初始化函数，我们对这几个函数分开解析。</p>
+<h2 id="30"><code>runtime.args</code>参数分析</h2>
+<p>函数<code>runtime.args</code>这个其实不像字面的这么简单，在Linux上，这个函数除了把<code>argc</code>和<code>argv</code>存到静态变量里面外，他还负责解析<code>ELF</code>[PE-ELF][Executable and Linkable]头，并初始化系统调用的地址。
+对于这个可能要稍微解释一下，当操作系统将一个可执行的文件加载进内存的时候，系统会初始化一个初始的可执行栈，然后根据执行镜像的头初始化一些预先定义好的格式化数据，这个可执行栈的顶部区域会存放环境变量相关的参数，同时会把ELF的辅助信息放到可执行栈的底部，如下的代码段所示：</p>
+<pre><code>position            content                     size (bytes) + comment
+  ------------------------------------------------------------------------
+  stack pointer -&gt;  [ argc = number of args ]     4
+                    [ argv[0] (pointer) ]         4   (program name)
+                    [ argv[1] (pointer) ]         4
+                    [ argv[..] (pointer) ]        4 * x
+                    [ argv[n - 1] (pointer) ]     4
+                    [ argv[n] (pointer) ]         4   (= NULL)
+
+                    [ envp[0] (pointer) ]         4
+                    [ envp[1] (pointer) ]         4
+                    [ envp[..] (pointer) ]        4
+                    [ envp[term] (pointer) ]      4   (= NULL)
+
+                    [ auxv[0] (Elf32_auxv_t) ]    8
+                    [ auxv[1] (Elf32_auxv_t) ]    8
+                    [ auxv[..] (Elf32_auxv_t) ]   8
+                    [ auxv[term] (Elf32_auxv_t) ] 8   (= AT_NULL vector)
+
+                    [ padding ]                   0 - 16
+
+                    [ argument ASCIIZ strings ]   &gt;= 0
+                    [ environment ASCIIZ str. ]   &gt;= 0
+
+  (0xbffffffc)      [ end marker ]                4   (= NULL)
+
+  (0xc0000000)      &lt; bottom of stack &gt;           0   (virtual)</code></pre>
+<p>关于ELF辅助信息(ELF auxiliary vector)可以通过阅读<a href="http://articles.manugarg.com/aboutelfauxiliaryvectors" title="elf auxiliary vectors">这篇文章</a>加深了解。</p>
+<p>函数<code>runtime.args</code>会负责解析整个elf，但Golang主要关注的是一个字段<code>startupRandomData</code>，Go用这个字段来驱动hash函数，并初始化一些系统调用函数的地址。下面的三个函数就是在这个阶段初始化的：</p>
+<pre><code>__vdso_time_sym 
+__vdso_gettimeofday_sym 
+__vdso_clock_gettime_sym</code></pre>
+<p>上面的函数是用来获取各种单位的时间，这三个函数都有默认的实现，Golang通过<code>vsyscall</code>的方式调用上述的函数。</p>
+<hr>
+<h2 id="31"><code>runtime.osinit</code>系统相关的初始化</h2>
+<p>下一个初始化阶段调用的函数就是<code>runtime.osinit</code>，在linux上，这个函数主要干的一个事情就是通过系统调用获取当前机器的cpu个数，并保存到变量<code>ncpus</code>里面。</p>
+<hr>
+<h2 id="32"><code>runtime.schedinit</code>初始化调度器</h2>
+<p>接下来的<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/proc1.go#L40" title="runtime.schedinit">这个函数</a>做的事情比前面的<code>runtime.osinit</code>要多一些，他会先获取当前goroutine的上下文<code>runtime.g</code>的指针，前面关于tls的讨论里面我们已经多次涉及到这个东东了；然后如果开启了竞争检测，会调用函数<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/race1.go#L110" title="raceinit"><code>runtime.raceinit</code></a>，但这个函数通常都不会调用，我们跳过这个；过完这个函数后，紧接着又是一系列的函数调用：</p>
+<pre><code>    sched.maxmcount = 10000
+
+    // Cache the framepointer experiment.  This affects stack unwinding.
+    framepointer_enabled = haveexperiment(&quot;framepointer&quot;)
+
+    tracebackinit()
+    moduledataverify()
+    stackinit()
+    mallocinit()
+    mcommoninit(_g_.m)
+
+    goargs()
+    goenvs()
+    parsedebugvars()
+    gcinit()</code></pre>
+<p>我们对上面的函数一个一个进行解析。</p>
+<h3 id="32.1">栈回溯初始化<code>tracebackinit</code></h3>
+<p>函数<code>runtime.tracebackinit</code>这个<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/traceback.go#L58" title="traceback">函数</a>让我们有能力可以进行调用栈的回溯，这个调用栈保存了从当前goroutine启动到当前函数的完整执行路径，任何时候发生<code>panic</code>，我们都可以通过<code>runtime.gentraceback</code><a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/traceback.go#L120" title="gentraceback">获取当前的调用栈</a>，当然这个调用栈里面我们不需要列出一些我们不需要关注的內建函数调用，而函数<code>runtime.tracebackinit</code>就是做这个事情，把我们不需要关注的內建函数地址初始化，后续栈追踪的时候去掉这些內建函数。</p>
+<h3 id="32.2">符号验证<code>moduledataverify</code></h3>
+<p>符号是链接器生成的，这个函数用于验证这些数据的一致性。关于链接器，我们第三篇文章<a href="http://blog.altoros.com/golang-internals-part-3-the-linker-and-object-files.html" title="Part-3">Golang Internals, Part 3: The Linker, Object Files, and Relocations</a>有重点讨论这个，对于运行时来说，一个符号会对应到一个<code>moduledata</code><a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/symtab.go#L37" title="moduledata">结构体</a>，函数<code>runtime.moduledataverify</code>会验证这个可执行镜像的所有符号的一致性，如果二进制被篡改就会<code>panic</code>。</p>
+<pre><code>type moduledata struct {
+    pclntable    []byte
+    ftab         []functab
+    filetab      []uint32
+    findfunctab  uintptr
+    minpc, maxpc uintptr
+
+    text, etext           uintptr
+    noptrdata, enoptrdata uintptr
+    data, edata           uintptr
+    bss, ebss             uintptr
+    noptrbss, enoptrbss   uintptr
+    end, gcdata, gcbss    uintptr
+
+    typelinks []*_type
+
+    modulename   string
+    modulehashes []modulehash
+
+    gcdatamask, gcbssmask bitvector
+
+    next *moduledata
+}</code></pre>
+<h3 id="32.3">初始化动态栈的分配池<code>stackinit</code></h3>
+<p>要理解这一部做的事情，要先有一个背景知识，在Golang里面会开始为每一个goroutine分配一个容量比较小的栈，当这个栈的使用量达到某个阀值的时候就会扩容，运行时会从新分配一个两倍大小的栈，然后把原有栈里面的内容拷贝到新的栈里面，然后把新的栈赋值给这个goroutine。
+当然前面我们还是比较初略的讲的，这里面还是有很多细节的，比如Golang是怎么判断栈达到阀值的，然后申请新的栈后，怎么调整栈里面的指针让这个新栈可以继续有效的使用等等，在前面的博文里面我们也讨论了这个问题，关于这个主题读者可以从<a href="https://docs.google.com/document/d/1wAaf1rYoM4S4gtnPh0zOlGzWtrZFQ5suE8qr2sD8uWQ/pub" title="continues stacks">这篇文章</a>里面获取更多详细的内容。
+对于栈的管理，Golang使用一个缓冲池来管理，Golang会在<code>runtime.stackinit</code><a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/stack1.go#L54" title="stackinit">函数</a>里面初始化这个，这个池是一个数组，数组的每一项都是栈的列表，同一个列表的栈的容量是一样的。另外一个在这个函数里面初始化的变量是<code>runtime.stackFreeQueue</code>，这也是一个栈的列表，这个列表在垃圾回收的过程中，会把需要回收的栈加入到这个列表，然后在垃圾回收结束的时候，释放这个列表上的所有栈。注意：这里栈的缓冲池只管理2Kb、4Kb、8Kb大小的栈，更大的栈通过直接分配释放来管理。</p>
+<h3 id="32.4">初始化内存分配器 <code>mallocinit</code></h3>
+<p>内存分配器是基于<code>tcmalloc</code>，Golang 会在函数<code>runtime.mallocinit</code>里面初始化它，如果想理解这个分配器，强烈建议读者阅读<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/malloc.go#L5" title="malloc-source-code">代码注释</a>里面提到的<a href="http://goog-perftools.sourceforge.net/doc/tcmalloc.html" title="tcmalloc">这篇文章</a>，我们这里对分配器初始化函数做进一步的探讨：</p>
+<pre><code>func mallocinit() {
+    initSizes()
+
+    if class_to_size[_TinySizeClass] != _TinySize {
+        throw(&quot;bad TinySizeClass&quot;)
+    }
+
+    var p, bitmapSize, spansSize, pSize, limit uintptr
+    var reserved bool
+
+    // limit = runtime.memlimit();
+    // See https://golang.org/issue/5049
+    // TODO(rsc): Fix after 1.1.
+    limit = 0
+
+    // Set up the allocation arena, a contiguous area of memory where
+    // allocated data will be found.  The arena begins with a bitmap large
+    // enough to hold 4 bits per allocated word.
+    if ptrSize == 8 &amp;&amp; (limit == 0 || limit &gt; 1&lt;&lt;30) {
+        // On a 64-bit machine, allocate from a single contiguous reservation.
+        // 512 GB (MaxMem) should be big enough for now.
+
+        arenaSize := round(_MaxMem, _PageSize)
+        bitmapSize = arenaSize / (ptrSize * 8 / 4)
+        spansSize = arenaSize / _PageSize * ptrSize
+        spansSize = round(spansSize, _PageSize)
+        for i := 0; i &lt;= 0x7f; i++ {
+            switch {
+            case GOARCH == &quot;arm64&quot; &amp;&amp; GOOS == &quot;darwin&quot;:
+                p = uintptr(i)&lt;&lt;40 | uintptrMask&amp;(0x0013&lt;&lt;28)
+            case GOARCH == &quot;arm64&quot;:
+                p = uintptr(i)&lt;&lt;40 | uintptrMask&amp;(0x0040&lt;&lt;32)
+            default:
+                p = uintptr(i)&lt;&lt;40 | uintptrMask&amp;(0x00c0&lt;&lt;32)
+            }
+            pSize = bitmapSize + spansSize + arenaSize + _PageSize
+            p = uintptr(sysReserve(unsafe.Pointer(p), pSize, &amp;reserved))
+            if p != 0 {
+                break
+            }
+        }
+    }
+
+    if p == 0 {
+
+        arenaSizes := []uintptr{
+            512 &lt;&lt; 20,
+            256 &lt;&lt; 20,
+            128 &lt;&lt; 20,
+        }
+
+        for _, arenaSize := range arenaSizes {
+            bitmapSize = _MaxArena32 / (ptrSize * 8 / 4)
+            spansSize = _MaxArena32 / _PageSize * ptrSize
+            if limit &gt; 0 &amp;&amp; arenaSize+bitmapSize+spansSize &gt; limit {
+                bitmapSize = (limit / 9) &amp;^ ((1 &lt;&lt; _PageShift) - 1)
+                arenaSize = bitmapSize * 8
+                spansSize = arenaSize / _PageSize * ptrSize
+            }
+            spansSize = round(spansSize, _PageSize)
+
+
+            p = round(firstmoduledata.end+(1&lt;&lt;18), 1&lt;&lt;20)
+            pSize = bitmapSize + spansSize + arenaSize + _PageSize
+            p = uintptr(sysReserve(unsafe.Pointer(p), pSize, &amp;reserved))
+            if p != 0 {
+                break
+            }
+        }
+        if p == 0 {
+            throw(&quot;runtime: cannot reserve arena virtual address space&quot;)
+        }
+    }
+
+    // PageSize can be larger than OS definition of page size,
+    // so SysReserve can give us a PageSize-unaligned pointer.
+    // To overcome this we ask for PageSize more and round up the pointer.
+    p1 := round(p, _PageSize)
+
+    mheap_.spans = (**mspan)(unsafe.Pointer(p1))
+    mheap_.bitmap = p1 + spansSize
+    mheap_.arena_start = p1 + (spansSize + bitmapSize)
+    mheap_.arena_used = mheap_.arena_start
+    mheap_.arena_end = p + pSize
+    mheap_.arena_reserved = reserved
+
+    if mheap_.arena_start&amp;(_PageSize-1) != 0 {
+        println(&quot;bad pagesize&quot;, hex(p), hex(p1), hex(spansSize), hex(bitmapSize), hex(_PageSize), &quot;start&quot;, hex(mheap_.arena_start))
+        throw(&quot;misrounded allocation in mallocinit&quot;)
+    }
+
+    // Initialize the rest of the allocator.
+    mHeap_Init(&amp;mheap_, spansSize)
+    _g_ := getg()
+    _g_.m.mcache = allocmcache()
+}</code></pre>
+<h4 id="32.4.1">初始化类大小</h4>
+<p>函数<code>runtime.mallocinit</code>第一个做的事情就是调用函数<code>runtime.initSizes</code><a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/msize.go#L66" title="initSizes">初始化</a>一个类大小的数组，这个负责预先计算一系列的类大小，这些小的内存块主要应对的是小于32Kb的小对象的分配。对于new一个对象的时候，Go会把申请的大小round到一个固定大小，这个大小会大于等于需要申请的内存大小，当然这样也就导致一部分内存浪费，但是也让不同类型的对象能够共享内存块，提高内存利用率。我们大概贴一下这个函数的关键部分：</p>
+<pre><code>     align := 8
+    for size := align; size &lt;= _MaxSmallSize; size += align {
+        if size&amp;(size-1) == 0 { 
+            if size &gt;= 2048 {
+                align = 256
+            } else if size &gt;= 128 {
+                align = size / 8
+            } else if size &gt;= 16 {
+                align = 16 
+…
+            }
+        }</code></pre>
+<p>从代码里面可以看到最小的两个类别大小是8字节和16字节，这里会分为四组对齐方式:</p>
+<ol>
+<li>[0,16)大小的内存采用8字节对齐</li>
+<li>[16, 128)大小的内存采用16字节对齐的方式</li>
+<li>[128, 2048)大小的内存采用size/8字节对齐的方式</li>
+<li>[2048, -)大小的内存采用256字节对齐的方式
+函数<code>runtime.initSizes</code>会初始化<code>class_to_size</code><a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/msize.go#L49" title="class_to_size array">数组</a>，这个数组建立类别与大小的关系，每一个列表对应到一个内存的大小，这里的类别也就是<code>class_to_size</code>数组的下标；同时这个函数还会初始化<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/msize.go#L50" title="class_to_allocnpages array">数组</a><code>class_to_allocnpages</code>，这个数组存储的是类别对应的内存页面数，也就是当前类别对应大小，映射到系统这边需要分配的内存页的数目。从一个内存大小转换到类别，有两个辅助数组<code>class_to_size8</code>和<code>class_to_size128</code>，这两个数组分别负责[0, 1Kb], 以及[1Kb, 32Kb]的内存分类。</li>
+</ol>
+<h4 id="32.4.2">保留部分虚拟内存</h4>
+<p>函数<code>runtime.mallocinit</code>干的另外一个事情就是申请虚拟内存，加快后续的内存分配。我们看下在x64体系下是怎么做的，首先初始化如下的变量：</p>
+<pre><code>arenaSize := round(_MaxMem, _PageSize)
+bitmapSize = arenaSize / (ptrSize * 8 / 4)
+spansSize = arenaSize / _PageSize * ptrSize
+spansSize = round(spansSize, _PageSize)</code></pre>
+<ul>
+<li>arenaSize: 是保留的最大虚拟内存，在x64架构上是512Gb</li>
+<li>bitmapSize: 是GC的辅助位图需要保留的总的内存大小，这个内存位图是一块特殊的内存，这块内存会记录那些地方存放了对象指针，以及指针对象是否已经被标记</li>
+<li>spansSize：是存储Memory-Span指针数组所需要的总的内存大小。而Memory-Span是Golang里面对象内存分配器使用的原始内存区块</li>
+</ul>
+<p>上述的内存大小计算好后，系统需要保留的总的内存大小可以如下计算得到：</p>
+<pre><code>pSize = bitmapSize + spansSize + arenaSize + _PageSize  
+p = uintptr(sysReserve(unsafe.Pointer(p), pSize, &amp;reserved))</code></pre>
+<p>最后我们初始化全局变量<code>mheap_</code>，这个是所有内存释放的中心存储器，所有内存分配都是在这个堆对象上进行。</p>
+<pre><code>p1 := round(p, _PageSize)
+
+mheap_.spans = (**mspan)(unsafe.Pointer(p1))
+mheap_.bitmap = p1 + spansSize
+mheap_.arena_start = p1 + (spansSize + bitmapSize)
+mheap_.arena_used = mheap_.arena_start
+mheap_.arena_end = p + pSize
+mheap_.arena_reserved = reserved</code></pre>
+<p>注意到：在堆变量初始化里面我们把<code>mheap_.arena_used</code>设置为<code>mheap_.arena_start</code>，因为在开始的时候我们还没有发生任何内存分配。</p>
+<h4 id="32.4.3">初始化堆</h4>
+<p>下一个被调用的<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mheap.go#L273" title="mHeap_Init">函数</a>是<code>mHeap_Init</code>，这个函数里面第一个做的事情是内存分配器的初始化：</p>
+<pre><code>fixAlloc_Init(&amp;h.spanalloc, unsafe.Sizeof(mspan{}), recordspan, unsafe.Pointer(h), &amp;memstats.mspan_sys)
+fixAlloc_Init(&amp;h.cachealloc, unsafe.Sizeof(mcache{}), nil, nil, &amp;memstats.mcache_sys)
+fixAlloc_Init(&amp;h.specialfinalizeralloc, unsafe.Sizeof(specialfinalizer{}), nil, nil, &amp;memstats.other_sys)
+fixAlloc_Init(&amp;h.specialprofilealloc, unsafe.Sizeof(specialprofile{}), nil, nil, &amp;memstats.other_sys)</code></pre>
+<p>要理解内存分配器是什么？要先看下内存分配器<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mfixalloc.go#L54" title="fixAlloc_Alloc">是怎么使用的</a><code>fixAlloc_Alloc</code>，每一次需要申请创建<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mheap.go#L101" title="mspan">mspan</a>、<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mcache.go#L11" title="mcache">mcache</a>、<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mheap.go#L1009" title="specialfinalizer">specialfinalizer</a>或者<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mheap.go#L1050" title="specialprofile">specialprofile</a>结构体都需要调用到这个函数<code>fixAlloc_Alloc</code>，在这个内存分配器的分配函数里面主要的一段代码如下所示：</p>
+<pre><code>       if uintptr(f.nchunk) &lt; f.size {
+        f.chunk = (*uint8)(persistentalloc(_FixAllocChunk, 0, f.stat))
+        f.nchunk = _FixAllocChunk
+    }</code></pre>
+<p>对于一个分配器来说，他不是直接从系统申请给定大小<code>f.size</code>的内存，而是先通过<code>persistentalloc</code>申请一个<code>_FixAllocChunk</code>(现在是16Kb)的内存，然后把部分内存返回给调用者，把剩下的存在挂载到分配器上，下次通过同样的分配器申请内存的时候就可以直接使用这些余留的内存，这样避免每次调用<code>persistentalloc</code>函数带来的开销，<code>persistentalloc</code>函数大家也可以看出来，通过这个函数申请的内存是不参与GC的，上述的过程如下代码所示：</p>
+<pre><code>    v := (unsafe.Pointer)(f.chunk)    // 返回需要的内存大小
+    if f.first != nil {
+        fn := *(*func(unsafe.Pointer, unsafe.Pointer))(unsafe.Pointer(&amp;f.first))
+        fn(f.arg, v)
+    }
+    f.chunk = (*byte)(add(unsafe.Pointer(f.chunk), f.size)) // 剩下的内存继续放到分配器上
+    f.nchunk -= uint32(f.size)
+    f.inuse += f.size    // 记录这块已经使用的大小
+    return v</code></pre>
+<p>其中函数<code>persistentalloc</code>的内存申请流程是如下：</p>
+<ol>
+<li>如果申请的内存大小操过64Kb，则直接从OS申请</li>
+<li>否则找一个合适的持久化分配器来处理内存分配<ul>
+<li>每一个CPU-内核都会绑定一个持久分配器，这样我们就避免了在分配器上加锁的操作，我们需要做的就是获取当前处理器对应的分配器</li>
+<li>如果找不到当前处理器对应的分配器，则我们使用一个全局的分配器</li>
+</ul>
+</li>
+<li>如果当前分配器的内存缓存区域已经不够分配这次内存申请，则先从OS申请更多内存</li>
+<li>确保分配器的缓冲区的内存足够后，我们从分配器的缓冲区分配内存区块给到使用者</li>
+</ol>
+<p>函数<code>persistentalloc</code>和函数<code>fixAlloc_Alloc</code>他们的机制是基本类似的，我们也可以这样理解，他们分别提供了不同层面的内存缓存机制。当然<code>persistentalloc</code>函数不仅仅在<code>fixAlloc_Alloc</code>函数里面使用，任何其他需要申请持久内存的地方都会使用到它。</p>
+<p>好，我们把焦点移回到函数<code>mHeap_Init</code>身上，在前面初始化分配器的时候，我们初始化了4类结构体的分配器，这对于是4类结构体他们的作用分别是什么呢，我们这里就来分别介绍一下这些结构体的作用：</p>
+<ul>
+<li><code>mspan</code>这个结构体封装了用于被垃圾回收的内存块，前面讨论<code>size_to_class</code>的时候我们有提到这个，需要申请某一种大小的内存的时候，我们会创建一个相应的<code>mspan</code>作为这种大小的内存申请的缓冲区。</li>
+<li><code>mcache</code>这个是<code>mspan</code>的缓冲区，会为每一个CPU的核准备一个<code>mcache</code>，这样也可以避免内存分配的时候上锁</li>
+<li><code>specialfinalizer</code>这个是调用函数<code>runtime.SetFinalizer</code>时候分配的结构体，这个结构体里面存储的信息让我们有能力在某一个对象被垃圾回收的时候，我们顺带着做一些自定义的回收操作，一个典型的例子就是创建文件对象<code>os.NewFile</code>，每一个文件对象都会通过调用<code>runtime.SetFinalizer</code>关联一个析构结构体，当这个文件对象被垃圾回收的时候，我们调用系统函数关闭相应的文件描述符。</li>
+<li><code>specialprofile</code>这个是做性能分析的时候创建的结构体，这里暂时不多聊</li>
+</ul>
+<p>初始化好这些内存分配器后，<code>mHeap_Init</code>后面通过<a href="https://github.com/golang/go/blob/go1.5.1/src/runtime/mheap.go#L863" title="spanlist_init">调用</a><code>mSpanList_Init</code>初始化一些列表结构，<code>mheap</code>本身还是包含蛮多列表的。</p>
+<ul>
+<li><code>mheap.free</code>和<code>mheap.busy</code>包含的是大于32Kb小于1Mb的<code>mspan</code>数组，这里的大小是内存页的数目，一个内存页是32Kb，这里数组的一个等差数组，第一个元素包含的是32Kb的span列表，第二个元素包含的就是64Kb的span列表，以此类推。</li>
+<li><code>mheap.freelarge</code>和<code>mheap.busylarge</code> 是处理大于1Mb的<code>mspan</code>，机制与上一致</li>
+</ul>
+<p>下一个初始化的是<code>mheap.central</code>，这里存储的是小于32Kb的<code>mspan</code>，在<code>mheap.central</code>也是按照大小分组。</p>
+<h4 id="32.4.4">最后的内存初始化操作</h4>
+<p>在函数<code>mallocinit</code>里面关于内存初始化还有最后一个东西，<code>mcache</code>的初始化：</p>
+<pre><code>_g_ := getg()
+_g_.m.mcache = allocmcache()</code></pre>
+<p>首先获取goroutine，然后申请一个<code>mcache</code>赋值给<code>g.m.mcache</code>，函数<code>allocmcache</code>会调用<code>fixAlloc_Alloc</code>初始化一个新的<code>mcache</code>结构体。细心的读者可能也注意到，前面我们提到<code>mcache</code>会绑定到处理器，但这里又把<code>mcache</code>关联到了goroutine，goroutine对应到到的是系统的处理单元，类似线程的概念。是的这里没有搞错，一个goroutine的<code>mcache</code>会在goroutine的相应执行单元切换也就是线程切换的时候进行调整，找到相应线程的<code>mcache</code>。</p>
+<h2 id="33">到底还有谁？</h2>
+<p>下一篇文章，我们依然紧靠启动引导过程，我们会关注GC是怎么初始化的，以及第一个goroutine是怎么启动起来的。</p>
+
+</article>
+<footer>
+<h3 id="33.1">欢迎转载</h3>
+<p>本程序基于MIT协议开源。</p>
+<pre><code>Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.</code></pre>
+
+</footer>
+</body>
+</html>
