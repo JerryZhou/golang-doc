@@ -538,21 +538,24 @@ const (
 	mul_op     = "*" | "/" | "%" | "<<" | ">>" | "&" | "&^" .
 
 	unary_op   = "+" | "-" | "!" | "^" | "*" | "&" | "<-" .
+
 对于二元操作符，两步的操作类型必须一致，除非这个操作涉及到shifts或者untyped-constants. 关于常量表达式，可以参照这个[const-expressions小节](#jump__todos___)
 对于shift操作，如果其中一个参数是untyped-constant,那么这个参数会被转到另外一个参数的类型。在shift操作表达式里面右操作数必须是一个unsigned-integer-type或者可以转到unsigned-integer-type的untyped-constant, 如果左操作数是一个untyped-constant,那么它会被首先进行隐藏的上下文推导转换。
-	var s uint = 33
-	var i = 1<<s           // 1 has type int
-	var j int32 = 1<<s     // 1 has type int32; j == 0
-	var k = uint64(1<<s)   // 1 has type uint64; k == 1<<33
-	var m int = 1.0<<s     // 1.0 has type int; m == 0 if ints are 32bits in size
-	var n = 1.0<<s == j    // 1.0 has type int32; n == true
-	var o = 1<<s == 2<<s   // 1 and 2 have type int; o == true if ints are 32bits in size
-	var p = 1<<s == 1<<33  // illegal if ints are 32bits in size: 1 has type int, but 1<<33 overflows int
-	var u = 1.0<<s         // illegal: 1.0 has type float64, cannot shift
-	var u1 = 1.0<<s != 0   // illegal: 1.0 has type float64, cannot shift
-	var u2 = 1<<s != 1.0   // illegal: 1 has type float64, cannot shift
-	var v float32 = 1<<s   // illegal: 1 has type float32, cannot shift
-	var w int64 = 1.0<<33  // 1.0<<33 is a constant shift expression
+
+>    `var s uint = 33`
+>    `var i = 1<<s           // 1 has type int`
+>    `var j int32 = 1<<s     // 1 has type int32; j == 0`
+>    `var k = uint64(1<<s)   // 1 has type uint64; k == 1<<33`
+>    `var m int = 1.0<<s     // 1.0 has type int; m == 0 if ints are 32bits in size`
+>    `var n = 1.0<<s == j    // 1.0 has type int32; n == true`
+>    `var o = 1<<s == 2<<s   // 1 and 2 have type int; o == true if ints are 32bits in size`
+>    `var p = 1<<s == 1<<33  // illegal if ints are 32bits in size: 1 has type int, but 1<<33 overflows int`
+>    `var u = 1.0<<s         // illegal: 1.0 has type float64, cannot shift`
+>    `var u1 = 1.0<<s != 0   // illegal: 1.0 has type float64, cannot shift`
+>    `var u2 = 1<<s != 1.0   // illegal: 1 has type float64, cannot shift`
+>    `var v float32 = 1<<s   // illegal: 1 has type float32, cannot shift`
+>    `var w int64 = 1.0<<33  // 1.0<<33 is a constant shift expression`
+
 
 #### Operator precedence
 一元操作符有最高的优先级，但是`++`和`--`他们是statements,不是expressions,他们不属于操作符优先级里面，因此`*p++`和`(*p)++`等价
