@@ -158,3 +158,11 @@ void foo() {
 [2] http://www.agner.org/optimize/blog/read.php?i=142&v=t
 [3] http://www.peterstock.co.uk/games/mingw_sse/ 
 
+### 其他文献
+https://msdn.microsoft.com/zh-cn/library/83ythb65.aspx
+https://en.wikipedia.org/wiki/Data_structure_alignment
+http://www.catb.org/esr/structure-packing/
+http://www.cnblogs.com/clover-toeic/p/3853132.html
+http://www.cnblogs.com/Dageking/archive/2013/03/11/2954394.html
+
+
