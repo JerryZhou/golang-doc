@@ -25,16 +25,16 @@ Understanding project structure
 
 从Go的仓库src目录下，我们会看到很多子目录。大部分子目录都是Go标准库的代码。标准库里面的每个子目录的里面代码的包名和目录名保持一致，这也是go的标准命名规则。除开这部分标准库，还有一些目录，其中重要的目录有如下几个:
 
-|目录|描述|
-|-----|----|
-|/src/cmd/|包含了各种golang的命令|
-|/src/cmd/go|包含了命令行工具Go的实现：通过调用其他编译，链接工具，实现下载编译Go的源文件|
-|/src/cmd/dist|这个工具负责编译目录下的其他命令行工具，并且负责编译Go的标准库|
-|/src/cmd/gc|这是一个与架构无关的Go的编译器实现，是第一个Go的编译器|
-|/src/cmd/ld|Go的链接器的实现，与平台相关的代码会放在以平台架构命名的子目录下面|
-|/src/cmd/5a,6a,8a,9a|这里面是Go为各个不同平台实现的汇编指令编译器，Go的汇编指令跟本机的汇编指令不一样，这些工具负责把Go的汇编指令翻译为不同架构的汇编指令，详细信息可以在[这里](https://golang.org/doc/asm)查看。|
-|/src/lib9,/src/libio,/src/liblink| 这些是编译器，链接器以及Go运行时用到的一些库|
-|/src/runtime/| 最重要的Go包，会包含进所有的Go程序里面，这是整个Go的运行时：比如垃圾回收内存管理， gorountines, channel 等等|
+| 目录                                | 描述                                       |
+| --------------------------------- | ---------------------------------------- |
+| /src/cmd/                         | 包含了各种golang的命令                           |
+| /src/cmd/go                       | 包含了命令行工具Go的实现：通过调用其他编译，链接工具，实现下载编译Go的源文件 |
+| /src/cmd/dist                     | 这个工具负责编译目录下的其他命令行工具，并且负责编译Go的标准库         |
+| /src/cmd/gc                       | 这是一个与架构无关的Go的编译器实现，是第一个Go的编译器            |
+| /src/cmd/ld                       | Go的链接器的实现，与平台相关的代码会放在以平台架构命名的子目录下面       |
+| /src/cmd/5a,6a,8a,9a              | 这里面是Go为各个不同平台实现的汇编指令编译器，Go的汇编指令跟本机的汇编指令不一样，这些工具负责把Go的汇编指令翻译为不同架构的汇编指令，详细信息可以在[这里](https://golang.org/doc/asm)查看。 |
+| /src/lib9,/src/libio,/src/liblink | 这些是编译器，链接器以及Go运行时用到的一些库                  |
+| /src/runtime/                     | 最重要的Go包，会包含进所有的Go程序里面，这是整个Go的运行时：比如垃圾回收内存管理， gorountines, channel 等等 |
 
 - - -
 
@@ -51,13 +51,13 @@ Understanding project structure
 这里我们可以对比到clang的完整步骤:
 
 1. (source code)
-2. ==> preprocessing 					==> (.i,.ii,.mi,.mii)
-3. ==> parsing and semantic analysis 	==> (ast:abstract syntax tree) 
-4. ==> code generation and optionzation 	==> (.s)
-5. ==> assembler 						==> (.object)
-6. ==> linker 							==> (.so, .dylib)
+   2. ==> preprocessing 				==> (.i,.ii,.mi,.mii)
+   3. ==> parsing and semantic analysis ==> (ast:abstract syntax tree) 
+   4. ==> code generation and optionzation ==> (.s)
+      5. ==> assembler 				==> (.object)
+         6. ==> linker 				==> (.so, .dylib)
 
-- - - 
+- - - ​
 
 ## 深入Go的语法看看
 现在我们详解前面编译流程里面的第二步。[go.y][3] 这个文件包含李golang的语义设计规则，是我们学习go的编译器并且深入理解golang语法规则的一个很好的入手点。这个文件由一系列如下的声明组成：
@@ -65,7 +65,7 @@ Understanding project structure
 	xfndcl:
 		LFUNC fndcl fnbody
 	fndcl:
-     	sym '(' oarg_type_list_ocomma ')' fnres
+	 	sym '(' oarg_type_list_ocomma ')' fnres
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
 
 上面的代码段声明了两个节点xfndcl和fndcl的定义。fundcl这个节点可以有两种表现形式，第一种形式对应如下的一个构造函数：
@@ -82,34 +82,34 @@ xfndcl节点由存储在LFUNC里面的关键字func以及节点fndcl、fnbody组
 我们用一个例子(从g.y里面截取的一个简化版的节点配置)来理解我们这里提到的解析器怎么插入代码：
 
 	fndcl:
-      	sym '(' oarg_type_list_ocomma ')' fnres
-        {
-          t = nod(OTFUNC, N, N);
-          t->list = $3;
-          t->rlist = $5;
-
-          $$ = nod(ODCLFUNC, N, N);
-          $$->nname = newname($1);
-          $$->nname->ntype = t;
-          declare($$->nname, PFUNC);
-      	}
+	  	sym '(' oarg_type_list_ocomma ')' fnres
+	    {
+	      t = nod(OTFUNC, N, N);
+	      t->list = $3;
+	      t->rlist = $5;
+	
+	      $$ = nod(ODCLFUNC, N, N);
+	      $$->nname = newname($1);
+	      $$->nname->ntype = t;
+	      declare($$->nname, PFUNC);
+	  	}
 		| '(' oarg_type_list_ocomma ')' sym '(' oarg_type_list_ocomma ')' fnres
 
-首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后攒国家一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。
+首先创建一个节点存储函数的参数类型信息,类型信息里面会用到第3个子节点作为参数列表和第5个子节点作为返回值列表；然后生成一个新的节点作为result节点返回。上面的声明是伪造的一段，在go.y文件里面是找不到的。
 
 这里关于Bison、Flex，Yacc，这些想深入了解的可以继续观看[龙书][7]、[虎书][8]，[鲸书][9]。
- 
+
 - - -
 
 ## 理解节点
 
-现在我们要花点时间来理解"node"节点是一个啥子东东。node肯定是一个struct,你可以在[这里][6]找打结构体的定义。这个结构体你会看到有灰常多的属性，节点会有不同的用途，也会分成不同的类型，不同类型node，会有他相应的属性。下面会对一些我认为对理解node比较重要的属性做说明：
+现在我们要花点时间来理解"node"节点是一个啥子东东。node肯定是一个struct,你可以在[这里][6]找到结构体的定义。这个结构体你会看到有灰常多的属性，节点会有不同的用途，也会分成不同类型的node，会有他相应的属性。下面会对一些我认为对理解node比较重要的属性做说明：
 
-|成员|说明|
-|---|---|
-|op|这个用来区分节点类型，前面的例子里面我们有看到OTFUNC(operation type function)和ODCLFUNC(operation declaration function)两个类型|
-|type|这个是Type的制作，如果节点需要类型说明，这个变量就指向相关类型信息，当然也有一些节点是没有类型信息，比如一些控制流statements：if、switch或者for等|
-|val|Val类型的变量，里面存储了节点的合法有效值|
+| 成员   | 说明                                       |
+| ---- | ---------------------------------------- |
+| op   | 这个用来区分节点类型，前面的例子里面我们有看到OTFUNC(operation type function)和ODCLFUNC(operation declaration function)两个类型 |
+| type | 这个是Type的实例，如果节点需要类型说明，这个变量就指向相关类型信息，当然也有一些节点是没有类型信息，比如一些控制流statements：if、switch或者for等 |
+| val  | Val类型的变量，里面存储了节点的合法有效值                   |
 
 到这里我们已经说明了基础结构[node][6]，你可以结合现在的了解去详细阅读相关源代码。在下一节，我们会用一个简单的go程序来解读go编译器具体在生成节点这个阶段做了啥子黑科技。
 
