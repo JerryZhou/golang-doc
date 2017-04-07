@@ -556,6 +556,12 @@ POSIX定义的子串匹配规则如下：先选择输入字符串的尽可能的
 
 比如，用`(a|bcdef|g|ab|c|d|e|efg|fg)*`来匹配abcdefg的时候，对于`*`号来说，一共存在三种可能的方法来分割字符串：a  bcdef  g,  ab  c  d  efg, 和 ab  c  d  e  fg 。在Perl里面，对于可选操作来说，是倾向于尽可能早的进行确定性选择，也就是选择第一种版本的分割，在第一步的迭代匹配中`a`，而不是`ab`，因为a是最开始匹配到的。在POSIX里面，每一步里面都是倾向于匹配最大的子串，这样就导致如果遵循POSIX规则，就得选择`ab`的，在第四次的迭代里面会选择`efg`，而不是`e`。Glenn Fowler 写了一个[测试套装](http://www.research.att.com/~gsf/testregex/)来测试POSIX语法规则，Chris Kuklewicez 写了一个[更完整的测试套装](http://hackage.haskell.org/package/regex-posix-unittest)来发现实作中的[大部分BUG](http://www.haskell.org/haskellwiki/Regex_Posix)。
 
+其实有两种方法来避免POSIX子匹配语法带来的状态追溯空间的爆炸增长。第一种，是反向进行正则匹配，这样就会让匹配过程的状态记录保持和正则表达式本身的长度成线性关系。这个[程序](https://swtch.com/~rsc/regexp/nfa-posix.y.txt)列举了这种计数。第二种，Chris Kuklewicz [观察到](https://mail.haskell.org/pipermail/libraries/2009-March/011379.html)，如果再正则匹配的线程直接的比较行为本身是受限的或者说有规则的，那边把那些会产生冲突的每一个线程赋予一个优先级，然后[替换他们的子匹配的运行时状态记录](http://haskell.org/haskellwiki/RegexpDesign)，也可以让状态机在前向匹配的过程中不会出现状态空间的爆炸式增长。他在Haskell的包[regex-tdfa](http://hackage.haskell.org/package/regex-tdfa)里面实现了[这项技术](http://hackage.haskell.org/packages/archive/regex-tdfa/1.1.2/doc/html/src/Text-Regex-TDFA-NewDFA-Engine.html#line-152)。
+
+
+
+## Digression: A Forgotten Technique
+
 
 
 
