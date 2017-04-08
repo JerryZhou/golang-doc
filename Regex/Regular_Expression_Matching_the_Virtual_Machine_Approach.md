@@ -1,3 +1,7 @@
+---
+
+---
+
 # Regular Expression Matching: the Virtual Machine Approach
 
 
@@ -561,6 +565,94 @@ POSIX定义的子串匹配规则如下：先选择输入字符串的尽可能的
 
 
 ## Digression: A Forgotten Technique
+
+本文中说的最大的技术点主要是关于把正则匹配过程中的子匹配信息存储到匹配执行体的状态里面。我所知道在正则匹配引擎里面最早把这个技术实作出来是在Rob Pike写的sam编辑器里面(几年以后Bruce Janson 在原版的基础上做了修订)。其实关于这个技术最早在1974年的一本算法课本里面就有出现，只是后面的10年没有被任何人注意到，知道在sam编辑器里面实作出来。
+
+在1974年Aho, Hopcroft 和 Ullman 的书 <The Design and Analysis of Computer Algorithms> ，第九章里面的"Pattern Matching Algorithms"，在这章有两个有趣的练习题：
+
+​	9.6 设定 $ x = a_1a_2 \ldots a_n $ 为一个给定的字符串，然后 $ \alpha $ 是一个正则表达式。修改 9.1小节里面的算法(基于NFA状态机) 找出最小的  $ \mit k $   ，然后在 给定  $ \mit k $  下 ,   (a) 找出最小的 $ \mit j $ 和 (b) 最大的 $ \mit j $ 让 子字符串 $a_ja_{j+1}\ldots a_k$ 匹配$ \alpha $ [下标 $ \mit j $ 关联状态 $ S_j $]
+
+​	*9.7 设定 $ \mit x $ 和 $ \alpha $ 和 9.6小节一致，修改算法9.1，找到最小的 $ \mit j$ , 以及最大的 $\mit k$让$a_ja_{j+1}\ldots a_k$ 匹配 $\alpha$。
+
+练习题里面的9.6其实是在求最短匹配。而练习9.7是在求解最长匹配，也就是我们表述的"leftmost longest"匹配。事实上在文章更早的章节里面(9.2小节)就给出了相关的回答：
+
+各种不同的模式识别算法都是从9.1小节开始演进的。比如，我们给定正则表达式$\alpha$和文本字符串$x = a_1a_2\ldots a_n$，符合$\mit j<\mit k$ 并且$a_ja_{j+1}\ldots a_k$ 匹配正则表达式的所有匹配子串里面，求解里面最小的$\mit k$。我们可以从$\alpha$构建一个能处理$\mit I*\alpha$语法的 NFDFA 的状态机$\mit M$, 为了找到符合条件的最小的k，我们可以在9.11小节的代码段的2-12行插入一个测试代码，检测 $S_i$是否包含状态 _F_。我们可以把_F_做成单例，这样测试就没有多余的时间开销了；时间复杂度为_O(m)_，其中_m_是状态机_M_里面的状态数 。如果 $S_i$包含状态_F_，我们就可以break出主循环，表示我们已经发现了_x_里面子串$a_1a_2\dots a_i$就是最短的前置子串。
+
+算法9.1我们可以更进一步，我们可以找出最大的k，符合_j<k_, $a_ja_{j+1}\dots a_k$匹配$\alpha$(同样也适用于找最小的_j_)。我们给每一个状态$S_i$都关联一个整数，这个整数标识的就是相应的最大_j_(或者最小_j_)，比如 ($s_0$, $a_ja_{j+1}\ldots a_k$) |-* (s, *ε*)。
+
+和我前面已经提到的一样，在练习题里面提到的这个技术没有得到大家的注意，知道编辑器sam的问世，在sam编辑器后，依然在接下来的10年没有得到应用的重视。即便是在正则匹配工具awk里面(awk里面的a 其实就是 Aho本人啊)，也是使用的naive-quadratic的方式来四线的leftmost-longest匹配。
+
+
+
+### Digression: "Thompson's Algorithm"
+
+本系列的第一篇文章里面有如下的一段[说明](https://swtch.com/~rsc/regexp/regexp1.html#mcnaughton-yamada-b)：
+
+> ​	R. McNaughtom 和 H. Yamada 以及 Ken Thompson 普遍被认为是最先给出用NFAs来构建表达正则表达式的人，虽然他们都没有在发表的名章里面显示的提到NFA这个当时比较时髦的名字。 McNaughton 和 Yamada 的构建过程是创建一个 DFA，Thompson的是构建IBM 7094的机器码，但从他们的字里行间我们是能知道，他们其实都是在呈现一个NFA的构建过程。
+
+我们通过两边都没有明确提到NFA的学术文章，来追溯NFA的历史其实还是一个蛮有意思的事情。Thompson的文章里面，他只是提到了一个理论："根据 Brzozowski，这个算法可以在正则表达式上利用左推导原则来持续对给定的输入字符进行搜索"。
+
+在 Aho ， Hopcroft 和 Ullman的1974年出版的 _《The Design and Analysis of Computer Algorithms》_课本，是第一个明确的展示状态机算法，并且把正则表达式转换到一个NFA，然后给出明确的执行NFA算法的出处。在本章的目录的说明处有做一个备注："这里的正则表达式用到的模式匹配算法(9.1节的算法)是对Thompson[1968]算法的抽象"。
+
+Aho和Ullman的1977年发表的_Principles of Compiler Design_里面展示的是不带attribution的把正则表达式转换到NFAs的算法，从后面的一个关于正则表达式的怎么执行的讨论里面有如下的一段：
+
+> 把一个正则表达式转换到类似DFA的形式所需要的世界，与扫描输入行成正比，但比单纯的行扫描要花更多的时间。
+>
+> 为了让整个匹配搜索过程的时间消耗尽可能的高效，我们必须要平衡模式编译过程和输入内容的扫描过程所花费的时间。Thompson[1968]有提出一个可接受的建议，就是把正则表达式转换到一个NFA，而扫描输入的过程就是模拟运行NFA的过程。我们扫描输入行的时候，会保存一个叫做"当前"的状态列表，起始的状态列表就是包含$\varepsilon-CLOSURE$起始状态。如果_a_是下一个输入字符串，我们会创建一个新的状态列表，这个礼拜标示的是接受输入_a_从旧的状态列表可以达到的所有新的状态的列表。这个时候旧的状态列表可以丢弃了，然后我们计算新列表的$\varepsilon-CLOSURE$。如果最后的状态不在新的状态列表里面，我们就继续处理下一个输入字符。
+
+目录备注里面也提到："Thompson[1968] 描述了QED编辑器里面实现的正则表达式识别算法"。
+
+Aho, Sethi, 和 Ullman的1986年出版的_Compilers: Principles, Techniques, and Tools_（我们所说的龙书）给了一个算法把一个NFA转换到一个正则表达式"算法 3.3. (Thompson 的构建过程)"，算法那 3.4，“模拟运行一个NFA”。目录备注里面提到 "许多的文本编辑器都用正则表达式来做内容检索，比如Thompson[1968]年的QED编辑器里面所做的一样"。而1974年的课本里面提到这段的时候是这么表达的"对Thompson算法的一个抽象"，而在龙书里面就简单的表述为"Thompson的构建过程"。 两个还是非常容易的区分的，如果你去阅读 NFA 的当时的机器码，Thompson的1968年的论文里面，是每一个NFA的状态对应到一个字母或者转义符。对比龙书里面的，他是用两个状态来表达一个字符或者转义符，每一次连接操作的时候丢弃掉其中的一个状态(1974年的论文描述里面还没有这个链接优化)。这个额外的状态的引入让这个轮转过程会容易，但需要在实际的执行过程中管理两倍的状态。我也发现了很多论文使用龙书里面的构建过程，但引用的却是Thompons的论文。也见过一些文章"优化"Thompson的构建过程，但他其实干的事情是基于龙书里面的算法，然后再加一个后置处理阶段移除多余的那些状态。
+
+Aho 和 Ullman的1992年出版的[Foundations of Computer Science](http://infolab.stanford.edu/~ullman/focs.html)专门用一章 [Chapter 10]来阐述"Patterns, Automation and Regular Expressions"，在正文里面给出了现在大家非常熟悉的不带attribution的构建过程。目录说明里面依然也有这么一段："10.8节里面的从正则表达式来构建不确定状态机的构建过程有参考McNaughton和Yamada[1960]… 用正则表达式来描述字符串最先出现在Ken Thompson的 QED系统里面，并且这个思想后面影响了非常多的UNIX 系统命令"。提到的McNaughton和Yamada的论文非常有意思，因为他们的论文和Thompson的一样，也都没有明确的给出NFAs，只是给出了从正则表达式构建一个DFA，有了DFA以后才能执行一些列的后续操作编程NFA，但NFA至始至终是没有被提到的。
+
+Hopcroft , Motwani, 和 Ullman 在2001年出版的 _Introduction to Automation Theory, Languages, and Computation_也给出了一个非常熟悉的构建过程。从第3章里面可以看到"这里的*ε*-NFA构建过程来源于[McNaughton and Yamada, 1960]。。。, 甚至在开发 UNIX之前，K. Thompson 在grep等命令里面用到了他发明的正则表达式。"
+
+Aho, Lam, Sethi, 和 Ullman 2007年出版的 _Compilers: Principles, Techniques, and Tools (2nd Edition)_给出了更加精确的历史描述。 在1986年的书里面，算法3.3只是简单的称为"Thompson的构建过程"，到2007年修订以后，这个算法(3.23)表述被修订成"The McNaughton-Yamada-Thompson"算法，并且第三章有如下的一段阐述：
+
+> McNaughton 和 Yamada [1960]第一次给出了一个算法把正则表达式直接表示成一个有限状态机。 3.9小节里面的算法3.36，第一次被Aho用来实作他的Unix下的正则搜索工具egrep。这个算法后续也被用在awk[Aho, Kernighan 和 Weinberge, 1988]。而用不确定状态机为中介来处理的方法要归属于Thompson[1968]。后续的论文里面也给出Thompson在QED编辑器里面用到的运行非确定性有限状态机的算法。
+
+最后总结起来就是，Brzozowski提出，被Thompson引入的这个方法在工业界被忽视了很多年，但庆幸的是Ownen, Reppy 和 Turon 的另外一个优秀的论文 [Regular-expression derivateives reexamined](http://www.cl.cam.ac.uk/~so294/documents/jfp09.pdf)支持在一个支持symbolic-manipulation的语言里面有比状态机更加高效的方法来做模式匹配。
+
+
+
+### Implementations
+
+参考[前面的文章](https://swtch.com/~rsc/regexp/regexp1.html#History)了解实现的详细历史，这篇文章中具体的代码可以在这个[地方](http://code.google.com/p/re1/source/browse)取得。
+
+对于想完整了解现在的backtracking-engine的，可以看Henery Spencer的文章 "A Regular-Expression Matcher"，1994年 Academic Press 出版的 _《Software Solutions In C》_。
+
+
+
+### Summary
+
+把正则表达式理解成一个运行在一个虚拟机上的程序是一个非常有用的抽象： 一个正则表达式解析器可以把正则表达式翻译成相应的字节码，然后可以用不同的虚拟机实现来运行这个字节码。基于状态虚拟机的实现，能够和传统的回溯实现一样，可以追踪子表达式的匹配边界，同时还能保证线性的运行时间。
+
+感谢 Alex Healy 和 Chris Kuklewicz 一起关于  Perl和POSIX的自表达式语义的讨论，对我非常有用。
+
+P.S. 如果你喜欢阅读这篇文章，或者你也会有兴趣阅读 Roberto Ierusalimschy的论文[A Text Pattern-Matching Tool based on Parsing Expression Grammers](http://www.inf.puc-rio.br/~roberto/docs/peg.pdf)，里面有用类似的方法来匹配[PEGs](https://en.wikipedia.org/wiki/Parsing_expression_grammar).
+
+本系列的下一篇文章[Regular Expression Matching in the Wild]是一个实现之旅。
+
+
+
+### References
+
+[[1](https://swtch.com/~rsc/regexp/regexp2.html#pike-b)] Rob Pike, “The text editor sam,” Software—Practice & Experience 17(11) (November 1987), pp. 813–845. [*http://plan9.bell-labs.com/sys/doc/sam/sam.html*
+
+[[2](https://swtch.com/~rsc/regexp/regexp2.html#thompson-b)] Ken Thompson, “Regular expression search algorithm,” Communications of the ACM 11(6) (June 1968), pp. 419–422.[*http://doi.acm.org/10.1145/363347.363387*
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
