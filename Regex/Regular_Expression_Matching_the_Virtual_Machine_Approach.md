@@ -584,7 +584,7 @@ POSIX定义的子串匹配规则如下：先选择输入字符串的尽可能的
 
 
 
-### Digression: "Thompson's Algorithm"
+## Digression: "Thompson's Algorithm" 
 
 本系列的第一篇文章里面有如下的一段[说明](https://swtch.com/~rsc/regexp/regexp1.html#mcnaughton-yamada-b)：
 
@@ -616,7 +616,7 @@ Aho, Lam, Sethi, 和 Ullman 2007年出版的 _Compilers: Principles, Techniques,
 
 
 
-### Implementations
+## Implementations
 
 参考[前面的文章](https://swtch.com/~rsc/regexp/regexp1.html#History)了解实现的详细历史，这篇文章中具体的代码可以在这个[地方](http://code.google.com/p/re1/source/browse)取得。
 
@@ -624,7 +624,7 @@ Aho, Lam, Sethi, 和 Ullman 2007年出版的 _Compilers: Principles, Techniques,
 
 
 
-### Summary
+## Summary
 
 把正则表达式理解成一个运行在一个虚拟机上的程序是一个非常有用的抽象： 一个正则表达式解析器可以把正则表达式翻译成相应的字节码，然后可以用不同的虚拟机实现来运行这个字节码。基于状态虚拟机的实现，能够和传统的回溯实现一样，可以追踪子表达式的匹配边界，同时还能保证线性的运行时间。
 
@@ -636,7 +636,7 @@ P.S. 如果你喜欢阅读这篇文章，或者你也会有兴趣阅读 Roberto 
 
 
 
-### References
+## References
 
 [[1](https://swtch.com/~rsc/regexp/regexp2.html#pike-b)] Rob Pike, “The text editor sam,” Software—Practice & Experience 17(11) (November 1987), pp. 813–845. [*http://plan9.bell-labs.com/sys/doc/sam/sam.html*
 
