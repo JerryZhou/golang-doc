@@ -278,6 +278,18 @@ RE2里面的DFA大部分时间都花在调用memchr查找第一个其实字符A�
 
 PCRE变得不太适合处理这种情况，而RE2的DFA依然在快速的执行他的一次一个字节的匹配循环。
 
+接下来的一个基准测试对PCRE来说非常不适应。执行如下的正则匹配`[ -~]*ABCDEFGHIJKLMNOPQRSTUVWXYZ$`，而且搜寻的文本里面没有相应的匹配字符串，这个时候PCRE为了匹配`[  -~]*`需要以每一个字节位搜寻的起始字节搜寻怎么个输入文本，这种搜寻的时间复杂度是$O(text^2)$。与之对应的是RE2的DFA的时间复杂度依然是线性的，只需要遍历一次文本。
+
+![*Speed of searching for [ -~]\*ABCDEFGHIJKLMNOPQRSTUVWXYZ$ in random text. (Mac Pro)*](https://swtch.com/~rsc/regexp/regexp3g4.png)
+
+_**搜索并解析**_。另外一个RE的典型应用场景就是搜索和解析文本里面出现的特定字符串。这个基准测试会产生一个随机字符串，然后把 "(650 253-0001)"附加在随机字符串后面，然后在这个生成的文本上执行如下的无锚点匹配`(\d{3}-|\(\d{3}\)\s+)(\d{3}-\d{4})`，找到相应的7位电话号码，并提前相应的区位代码。
+
+![*Speed of searching for and matching (\d{3}-|\(\d{3}\\)\s+)(\d{3}-\d{4}) in random text ending wtih (650) 253-0001. (Mac Pro)*](https://swtch.com/~rsc/regexp/regexp3g5.png)
+
+RE2的快速主要归功于DFA提供的线性搜索能力。
+
+_**总结**_。RE2对每一个正则表达式需要10KB左右的内存占用，与之对应的PCRE只要需要0.5KB或者更少。与内存占用对应的是，RE2保障线性时间复杂度的搜索性能(虽然这里的线性参照值是根据情况而不同的)。
+
 
 
 
