@@ -7,9 +7,9 @@
 现代计算机的寻址通常是基于word-sized-chunk为单元的寻址，一个word-sized-chunk是基本寻址单元，通常这个寻址单元的大小是由处理器的架构决定的。现代处理的寻址单元通常是4字节(32位处理器)或者8字节(64位处理器)。早期的计算机，也是只能以这个word-sized为基本单元，这样也就导致计算机的寻址只能寻址word-sized的整数倍的地址。不过这里也需要被注明的是，现代计算机通常是支持多种word-sizes寻址，也就是寻址单元可以从最小的一个字节到自然word-size，最新的处理器甚至可以处理16字节的chunk寻址，或者直接一条[指令处理]( References
 [1] http://software.intel.com/en-us/articles/
 increasing-memory-throughput-with-intel-streaming-simd-extensions-4-intel-sse4-)full-cache-line的单元(比较典型的缓存线大小是64字节)。先现在的UNIX机器上，我们可以通过如下的命令获取当前处理器的word-size：
- * `getconf WORD_BIT`
- * `getconf LONG_BIT`
-比如在`x86_64`的机器上，`WORD_BIT` 会返回32，`LONG_BIT`会返回64。在没有64-bit扩展的单纯x86机器上`WORD_BIT`和`LONG_BIT`都是32。
+* `getconf WORD_BIT`
+* `getconf LONG_BIT`
+  比如在`x86_64`的机器上，`WORD_BIT` 会返回32，`LONG_BIT`会返回64。在没有64-bit扩展的单纯x86机器上`WORD_BIT`和`LONG_BIT`都是32。
 
 #### Alignment 101
 内存对其对于计算机来说非常重要，前面我们已经说到，对于比较老的处理器他们是不能处理没有对其的数据的，对于现代的处理器会采取一些低效的办法来适配没有对其的数据，只有最近的个别计算机具备能力无差别的加载字节对其数据和非对其数据[misaligned-data](http://www.agner.org/optimize/blog/read.php?i=142&v=t)。下面我们有图来形象的表述字节对其是怎么回事：
@@ -82,7 +82,7 @@ Listing 4: clang 加参数 -Wpadded 产生的警告的例子
 当如，如果你想关闭编译器的padding特性也是可以的，有如下的一些途径，比如方一个`__attribute__((packed))`在结构体定义后面，放一个 `#pragma pack (1)`在结构体定义前面，或者通过加一个编译器参数`-fpack-struct`。 这里需要特别提醒的是，如果进行上面的操作，那么这里会让应用程序产生一个[ABI](https://zh.wikipedia.org/wiki/%E5%BA%94%E7%94%A8%E4%BA%8C%E8%BF%9B%E5%88%B6%E6%8E%A5%E5%8F%A3)问题，我们需要在运行时检查一个结构体的sizeof信息，确保传入的参数是合法的。
 
 #### Performance Implications
-对于开发者来说，内存对其带来的效率提升我们需要仔细的弄清楚其中的原委，是不是值得开发者花精力来做，或者我们可以完全忽略内存对其，因为效率提升不明显，我们通过购买更快的处理器就好了。当然要弄清楚其中的详细的情况，我们需要根据具体情况来做一些区分，比如内核开发，驱动开发，或者内存极其有限的系统上，或者在一些非常，非常古老的编译器上，这些情景与之关联的情况也都是不一样的。
+对于开发者来说，内存对齐带来的效率提升我们需要仔细的弄清楚其中的原委，是不是值得开发者花精力来做，或者我们可以完全忽略内存对其，因为效率提升不明显，我们通过购买更快的处理器就好了。当然要弄清楚其中的详细的情况，我们需要根据具体情况来做一些区分，比如内核开发，驱动开发，或者内存极其有限的系统上，或者在一些非常，非常古老的编译器上，这些情景与之关联的情况也都是不一样的。
  如果我们想知道什么时候我们可以不用管内存对其问题，那么我们先来弄清楚他对新能的影响到底是怎么样的，为了测试性能，我们这里用两个同样的结构体，一个是内存对其的，另外一个是不对其的。
  ```
  struct Foo {
@@ -116,7 +116,7 @@ Listing 4: clang 加参数 -Wpadded 产生的警告的例子
      bar.z += 1;
  }
  clock_gettime(CLOCK, &end);
-```
+ ```
 Listing 6: Misaligned struct for the benchmark
 压力测试的例子我们是用 gcc(GCC)4.8.2 20131219(prerelease)版本，通过如下的编译指令`gcc -DRUNS=400000000 -DCLOCK=CLOCK_MONOTONIC -std=gnu99 -O0`编译，然后运行在一台Intel Core i7-2670QM CPU的 Linux3.12.5上，性能测试的结果如下：
 | aligned runtime: | unaligned runtime: |
@@ -136,7 +136,7 @@ Listing 6: Misaligned struct for the benchmark
  1. Linux : 看情况，以前的是 4字节对齐，现代的是16字节对齐
  2. Windows : 4 字节对齐
  3. OSX: 16字节对齐
-清晰上面的stack-alignment非常重要，因为混合的stack-alignment通常会导致非常严重的问题。
+    清晰上面的stack-alignment非常重要，因为混合的stack-alignment通常会导致非常严重的问题。
 
 考虑如下的情况：
 ```
@@ -148,7 +148,7 @@ void foo() {
 在现实情况中，上面的问题很少发生，如果真的发生了，这种崩溃也很难查证，如果开发者对字节对其的这个问题没有意思的话，就更不可能发现其中的问题了。这个问题再这里抛出的一个点是，提醒大家在做一些跨架构调用的地方需要特别注意，我们需要做`stack-realignment`. 在gcc或者clang里面，我们可以通过在函数上面加上属性`__attribute__((force_align_arg_pointer))`或者用编译器参数`-mstackrealign`来一次性应用到所有函数。虽然这个可以解决这个问题，但读者也要知道这里面其实是对函数加了一层调用路由的`realignment intro/outro`，这一层路由会确保函数的`stack-pointer`会按照调用方预期的传递。
 
 ### Conclusion
-结论，现在的编译器在通过padding的方式尽力优化数据结构, 提升效率，这种侠侣提升是以牺牲内存占用为代价的。但是通过前面我们的性能测试的例子，我们也关注到了，这种牺牲内存为代价或者潜在的性能提升的方法的收益甚微的。当然在一些老的处理器上字节对其带来的性能提升还是非常明显的。
+结论，现在的编译器在通过padding的方式尽力优化数据结构, 提升效率，这种效率提升是以牺牲内存占用为代价的。但是通过前面我们的性能测试的例子，我们也关注到了，这种牺牲内存为代价或者潜在的性能提升的方法的收益甚微的。当然在一些老的处理器上字节对其带来的性能提升还是非常明显的。
  现在对于开发者来说还需要关注到的字节对齐问题，就是我们应该尽可能优化数据结构体，合理排序成员，尽可能少的浪费内存，生成内存紧凑的结构体。
 
 
