@@ -4,7 +4,7 @@
 
 本系列的前面两篇文章[Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html),  [Regular Expression Matching: the Virtual Machine Approach](https://swtch.com/~rsc/regexp/regexp2.html)，分别对基于DFA和NFA的正则匹配算法做了解析，为了说明解析过程的原理，在正则规则上我们采用了从简原则。这篇文章从工程实作角度来描述具体的实现过程。
 
-2006年的我花了一个暑假做了一个[Code Search](http://www.google.com/codesearch)项目，让程序员可以用正则表达式来搜索代码。也就意味着，可以让你在全球的所有开源代码里面执行[grep](http://plan9.bell-labs.com/magic/man2html/1/grep)操作。我们开始打算采用PCRE做我们的正则匹配引擎，但后面了解到他采用的是回溯算法，会导致潜在的[指数时间复杂度](https://swtch.com/~rsc/regexp/regexp1.html)，以及相应的运行时栈溢出。因为代码搜索的服务是面向所有互联网用户的，如果采用PCRE，就会给我们带来攻击风险导致服务不可用。在排除PCRE以外的一个选择，就是我自己来写一个，新的这个匹配引擎是基于Ken Thompson的[开源版本的grep](http://swtch.com/usr/local/plan9/src/cmd/grep/)，这个grep采用的是基于DFA算法的。
+2006年，我花了一个暑假做了一个[Code Search](http://www.google.com/codesearch)项目，让程序员可以用正则表达式来搜索代码。也就意味着，可以让你在全球的所有开源代码里面执行[grep](http://plan9.bell-labs.com/magic/man2html/1/grep)操作。我们开始打算采用PCRE做我们的正则匹配引擎，但后面了解到他采用的是回溯算法，会导致潜在的[指数时间复杂度](https://swtch.com/~rsc/regexp/regexp1.html)，以及相应的运行时栈溢出。因为代码搜索的服务是面向所有互联网用户的，如果采用PCRE，就会给我们带来攻击风险导致服务不可用。在排除PCRE以外的一个选择，就是我自己来写一个，新的这个匹配引擎是基于Ken Thompson的[开源版本的grep](http://swtch.com/usr/local/plan9/src/cmd/grep/)，这个grep采用的是基于DFA算法的。
 
 在接下来的三年，我实现了一个新的匹配后端替换了grep里面相应的代码，扩展了原有的功能到支持POSIX的标准grep。这个新版本就是RE2, 提供与PCRE类似的C++的接口，而且功能也和PCRE基本保持一致，同时还保证了线性时间复杂度，同时不会出现栈溢出的问题。RE2现在被广泛的运用在Google里面，包括Code-Search,以及一些内部的系统比如[Sawzall](http://labs.google.com/papers/sawzall.html)和[Bigtable](http://labs.google.com/papers/bigtable.html)。
 
@@ -211,9 +211,9 @@ RE2里面，没有实现类似Python里面的别名特性，比如u"\N{LATIN SMA
 
 我们怎么知道RE2的代码是没有问题的呢？对正则表达式的实现做测试是一个非常复杂艰巨的任务，尤其当代码里面的分支非常多的时候，类似RE2的这种实现。其他的正则库，类似 [Boost](https://svn.boost.org/trac/boost/browser/trunk/libs/regex/test), [PCRE](http://vcs.pcre.org/viewvc/code/trunk/testdata/), 和 [Perl](http://perl5.git.perl.org/perl.git/tree/455f2c6c92e42c1a9e31268cbd491ba661f99882:/t/re) 他们积累了大量的手工维护的测试用例来检查正则表达式的基础功能，但是如果我们要用手工写的方式来对RE2做覆盖测试，我们很快会发现这是一个海量的工程，所以我们必须通过工具生成的方式做一些自动化的测试。
 
-给定一组小的正则表达式，以及相应的链接操作符，指定一个最大的链接数，[RegexpGenerator](http://code.google.com/p/re2/source/browse/re2/testing/regexp_generator.h)会生成所有可能的链接组合。给定一个字母表，和一个最大的长度，[`StringGenerator`](http://code.google.com/p/re2/source/browse/re2/testing/string_generator.h)会生成所有可能的字符串。然后所有生成的正则表达式在每一个生成的字符串上做匹配操作，然后匹配的结果与写的一个基于回溯算法实现的专门用来做测试用的正则表达式版本(通常会直接用PCRE)做比较。因为RE2和PCRE不是在所有测试用例上完全一致，所以还有一个[分析器](http://code.google.com/p/re2/source/browse/re2/mimics_pcre.cc)来检查所有RE2和PCRE不一致的那些情况，这些情况应该存在[Caveats](https://swtch.com/~rsc/regexp/regexp3.html#caveats)里面。除掉了我们已知的那些不匹配的情况外，RE2和PCRE应该在其他情形下有完全一致的输出。
+给定一组小的正则表达式，以及相应的链接操作符，指定一个最大的链接数，[RegexpGenerator](http://code.google.com/p/re2/source/browse/re2/testing/regexp_generator.h)会生成所有可能的链接组合。给定一个字母表，和一个最大的长度，[`StringGenerator`](http://code.google.com/p/re2/source/browse/re2/testing/string_generator.h)会生成所有可能的字符串。然后所有生成的正则表达式在每一个生成的字符串上做匹配操作，然后匹配的结果与写的一个基于回溯算法实现的专门用来做测试用的正则表达式版本(通常会直接用PCRE)做比较。因为RE2和PCRE不是在所有测试用例上完全一致，所以还有一个[分析器](http://code.google.com/p/re2/source/browse/re2/mimics_pcre.cc)来检查所有RE2和PCRE不一致的那些情况，这些已知的不一致都已经收藏[Caveats](https://swtch.com/~rsc/regexp/regexp3.html#caveats)里面。除掉了我们已知的那些不匹配的情况外，RE2和PCRE应该在其他情形下有完全一致的输出。
 
-虽然这种穷举的测试用例必须限制运行在小的正则表达式和小的输入字符串上，但是绝大部分的Bug其实都可以通过这些小的测试用例暴露出来。而且这些测试用例也基本覆盖了其他正则表达式引擎手写的那些用例。虽然如此，在RE2里面依然有一个随机的测试用例，通过`RegexpGenerator`和 `StringGenerator`生成一些随机的大的用例来做测试。当然基本不会出现只能再大用例里面才能出现，而小用例测试不到的情况。即便如此，我们维护这份大的用例让他可以正常运转依然是非常有意义的。
+虽然这种穷举的测试用例必须限制运行在小的正则表达式和小的输入字符串上，但是绝大部分的Bug其实都可以通过这些小的测试用例暴露出来。而且这些测试用例也基本覆盖了其他正则表达式引擎手写的那些用例。虽然如此，在RE2里面依然有一个随机的测试用例，通过`RegexpGenerator`和 `StringGenerator`生成一些随机的大的用例来做测试。当然基本不会出现只能在大用例里面才能出现，而小用例测试不到的情况。即便如此，我们维护这份大的用例让他可以正常运转依然是非常有意义的。
 
 
 
@@ -315,31 +315,24 @@ RE2在匹配行为上与PCRE也不是完全一致。这里有一些已知的差�
 
 还有一部分Perl和PCRE里面笔者看起来比较晦涩的特性，RE2选择不支持的：
 
-* ​
+* "扩展后"的正则表达式有一个不成为的规则，如果字符没有被转义的情况下，字符匹配是字符本身，当然标点符号除外。因此`\q`是代表的是有特殊含义的，而`\#`匹配的是字面字符`#`。Perl和PCRE还接受那些还没有被定义任何特定含义的字符也加上一个转义符号。因此在Perl里面，`\q`在没有定义特殊的匹配含义之前，它匹配的是字面字符`q`。RE2不接受这种规则，在RE2里面所有在转义符后面的字符，都是已经定义了特殊含义的才可以出现。通过这个，我们可以诊断到RE2是否支持相应的转义符，比如下面关于\cx的例子。
+* RE2里面不支持用`\cx`来代表`Control-X`字符。控制字符可以用C++里面的控制字符插入语法或者直接写8进制或者16进制的转义。
+* `\b`，在POSIX里面意味着退格；在Perl里面，如果放在一个字符类里面，比如`[\b]`，他才意味着退格，否则意味着单词边界。为了不带来这总迷惑，RE2干脆选择不支持`\b`来匹配退格。在POSIX模式下，RE2不接受`\b`，在Perl模式下，RE2识别为单词边界，而且不允许把`\b`放到字符类里面去。要识别退格，可以直接插入一个字面的退格，或者直接写相应的码点\010。
+* RE2 不支持原子分子运算符`(?>…)`，也不支持`++`运算符。这些运算符的作用主要是为了缓解回溯的性能问题。RE2里面有更加完整的性能方案，所以也就不需要支持这个。
+* RE2不识别 `\C`，`\G`和`\X`。
+* RE2不支持 条件子模式运算符`(?(...)...)`，不支持注释运算符`(?#...)`，模式引用`(?R)(?1)(?P>foo)`和C标注`(?C...)`。
+
+
+默认情况下，RE2会限制每一个RE2对象关联的两个处理器以及相应的DFAs占用的总内存不超过1MB。对于大部分的正则表达式来说这个内存大小都已经足够了，除非那些超大的正则表达式或者量级巨大的重复操作符匹配项情况下可能会超过这个限制。在编译阶段如果操过内存限制，会导致`re.ok()`返回false，并且可以通过`re.error()`查询到具体的错误信息。在搜索阶段，RE2是不会出现内存不足的情况的：如果发现内存不够的时候，RE2会丢弃缓存的DFA状态，然后从原有内存上启动一个新的DFA。如果发现需要频繁的去清理DFA，搜索过程会中断。
 
 
 
+## Summary
 
+RE2证明了是可以基于状态机理论来实作一个新的正则引擎，并且实现今天类似PCRE等基于递归回溯算法的正则引擎所具备的绝大部分正则特性。因为RE2是以状态机为理论基础构建的，所以RE2的运行效率是有严格保障的；并且基于RE2我们是可以做一些比搜索匹配本身更高应用价值的字符分析，这些分析对于基于递归回溯算法的那些正则引擎来说可能是非常困难的或者不可行的。最后RE2还是开源的，随便你倒腾。
 
+最近几年和Rob Pike以及Ken Thompson关于正则的讨论，对RE2的实现以及我对正则表达式的理解有非常大的帮助。RE2的C++的接口与Sanjay Ghemawat设计和实现的[基于C++的PCRE的接口](http://man.he.net/man3/pcrecpp)一致，其中FilteredRE2的代码是 Srinivasan Venkatachary 编写的。Philip Hazel 写的PCRE相关的代码非常优秀，为了匹配PCRE正则引擎实现的相关特性，也间接加快了RE2原有实施计划的进程，PCRE最后也成为了与RE2进行对比测试的另外一个具备非常优秀实现的正则引擎。非常感谢所有小伙伴的复出。
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+本系列的下一篇文章[Regular Expression Matching with a Trigram Index](https://swtch.com/~rsc/regexp/regexp4.html)，我们会来聊聊Google-Code-Search项目的幕后，看它具体是怎么工作的。
 
 
