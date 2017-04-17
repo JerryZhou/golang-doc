@@ -224,6 +224,197 @@ cindex
 
 [The indexer](https://code.google.com/p/codesearch/source/browse/cmd/cindex/cindex.go)会假定所有处理的文件都是以UTF-8为编码的。对于那些包含无效的UTF-8的文件或者说是行数过大的文件，或者说是拥有的三元语法单元过于庞大的文件，都会被索引处理程序丢弃掉。
 
+最后的索引文件里面会包含一个路径列表(前面有说道，主要用来进行索引更新)，以及具体被索引分析的文件列表和本文前面描述的带位置信息的具体inverted-index信息，只是这里存储的基本索引单元是三元语法单元。根据实践经验，索引文件的大小会是被索引文件的大约20%的大小。比如，对[Linux 3.1.3 内核源代码](http://www.kernel.org/pub/linux/kernel/v3.0/)，总共大约420MB，进行索引分析，会得到77MB的索引文件。当然，对于一个特定的搜索请求，我们并不需要访问整个77MB的索引，因为索引本身的组织方式也会是一个有序的。
+
+在我们有索引信息以后，我们就可以运行csearch来进行搜索：
+
+```
+csearch [-c] [-f fileregexp] [-h] [-i] [-l] [-n] regexp
+```
+
+这里的正则采用的是RE2实现的正则引擎，基本是一个[不具备后向引用的Perl版本的正则引擎](http://code.google.com/p/re2/wiki/Syntax)。(RE2支持括号捕获；与Perl的详细区分可以参考[code.google.com/p/re2](http://code.google.com/p/re2)底部的脚注)。csearch采用的命令行参数和grep类似，只是csearch是用golang写的，他并不区分长参数和短参数，也就不能做短参的合并：比如单独接受 -i -n做为参数，但不能合并参数为 -in。这里新增的一个参数 -f 标志控制搜索的文件必须匹配给出的 fileregexp 表达式。
+
+```
+$ csearch -f /usr/include DATAKIT
+/usr/include/bsm/audit_domain.h:#define	BSM_PF_DATAKIT		9
+/usr/include/gssapi/gssapi.h:#define GSS_C_AF_DATAKIT    9
+/usr/include/sys/socket.h:#define	AF_DATAKIT	9		/* datakit protocols */
+/usr/include/sys/socket.h:#define	PF_DATAKIT	AF_DATAKIT
+$
+```
+
+参数-verbose 会控制csearch打印详细的搜索过程统计数据。另外参数-brute会让搜索绕过三元索引，直接搜索索引库里面记录的每一个候选文件。比如上面例子里面搜索Datakit，在使用三元索引的情况下，会让候选搜索文件变为3个。
+
+```
+$ time csearch -verbose -f /usr/include DATAKIT
+2011/12/10 00:23:24 query: "AKI" "ATA" "DAT" "KIT" "TAK"
+2011/12/10 00:23:24 post query identified 3 possible files
+/usr/include/bsm/audit_domain.h:#define	BSM_PF_DATAKIT		9
+/usr/include/gssapi/gssapi.h:#define GSS_C_AF_DATAKIT    9
+/usr/include/sys/socket.h:#define	AF_DATAKIT	9		/* datakit protocols */
+/usr/include/sys/socket.h:#define	PF_DATAKIT	AF_DATAKIT
+0.00u 0.00s 0.00r
+$
+```
+
+与之对比的是，如果不适用索引的情况下，我们需要搜索2739个文件：
+
+```
+$ time csearch -brute -verbose -f /usr/include DATAKIT
+2011/12/10 00:25:02 post query identified 2739 possible files
+/usr/include/bsm/audit_domain.h:#define	BSM_PF_DATAKIT		9
+/usr/include/gssapi/gssapi.h:#define GSS_C_AF_DATAKIT    9
+/usr/include/sys/socket.h:#define	AF_DATAKIT	9		/* datakit protocols */
+/usr/include/sys/socket.h:#define	PF_DATAKIT	AF_DATAKIT
+0.08u 0.03s 0.11r  # brute force
+$
+```
+
+(笔者这里是基于OS X Lion ，搜索本机的目录/usr/include。对于读者来说这里具体的输出是依赖你自己系统的情况的。)
+
+用一个更大的搜索源来举例，比如我们需要在Linux 3.1.3 的内核源码里面来搜索 "hello world"，在使用三元索引的情况下，搜索的候选文档个数会从36972缩小到25个，有无索引的搜索时间的差异大约在100倍。
+
+```
+$ time csearch -verbose -c 'hello world'
+2011/12/10 00:31:16 query: " wo" "ell" "hel" "llo" "lo " "o w" "orl" "rld" "wor"
+2011/12/10 00:31:16 post query identified 25 possible files
+/Users/rsc/pub/linux-3.1.3/Documentation/filesystems/ramfs-rootfs-initramfs.txt: 2
+/Users/rsc/pub/linux-3.1.3/Documentation/s390/Debugging390.txt: 3
+/Users/rsc/pub/linux-3.1.3/arch/blackfin/kernel/kgdb_test.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/frv/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/mn10300/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/media/video/msp3400-driver.c: 1
+0.01u 0.00s 0.01r
+$ 
+
+$ time csearch -brute -verbose -h 'hello world'
+2011/12/10 00:31:38 query: " wo" "ell" "hel" "llo" "lo " "o w" "orl" "rld" "wor"
+2011/12/10 00:31:38 post query identified 36972 possible files
+/Users/rsc/pub/linux-3.1.3/Documentation/filesystems/ramfs-rootfs-initramfs.txt: 2
+/Users/rsc/pub/linux-3.1.3/Documentation/s390/Debugging390.txt: 3
+/Users/rsc/pub/linux-3.1.3/arch/blackfin/kernel/kgdb_test.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/frv/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/mn10300/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/media/video/msp3400-driver.c: 1
+1.26u 0.42s 1.96r  # brute force
+$ 
+```
+
+对于大小写不明感的搜索来说，虽然索引带来的精确性会降低，速度优化没有前面那么明显，但有无索引的搜索效率依然相差一个数量级：
+
+```
+$ time csearch -verbose -i -c 'hello world'
+2011/12/10 00:42:22 query: ("HEL"|"HEl"|"HeL"|"Hel"|"hEL"|"hEl"|"heL"|"hel")
+  ("ELL"|"ELl"|"ElL"|"Ell"|"eLL"|"eLl"|"elL"|"ell")
+  ("LLO"|"LLo"|"LlO"|"Llo"|"lLO"|"lLo"|"llO"|"llo")
+  ("LO "|"Lo "|"lO "|"lo ") ("O W"|"O w"|"o W"|"o w") (" WO"|" Wo"|" wO"|" wo")
+  ("WOR"|"WOr"|"WoR"|"Wor"|"wOR"|"wOr"|"woR"|"wor")
+  ("ORL"|"ORl"|"OrL"|"Orl"|"oRL"|"oRl"|"orL"|"orl") 
+  ("RLD"|"RLd"|"RlD"|"Rld"|"rLD"|"rLd"|"rlD"|"rld")
+2011/12/10 00:42:22 post query identified 599 possible files
+/Users/rsc/pub/linux-3.1.3/Documentation/filesystems/ramfs-rootfs-initramfs.txt: 3
+/Users/rsc/pub/linux-3.1.3/Documentation/java.txt: 1
+/Users/rsc/pub/linux-3.1.3/Documentation/s390/Debugging390.txt: 3
+/Users/rsc/pub/linux-3.1.3/arch/blackfin/kernel/kgdb_test.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/frv/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/mn10300/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/powerpc/platforms/powermac/udbg_scc.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/media/video/msp3400-driver.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/net/sfc/selftest.c: 1
+/Users/rsc/pub/linux-3.1.3/samples/kdb/kdb_hello.c: 2
+0.07u 0.01s 0.08r
+$
+
+$ time csearch -brute -verbose -i -c 'hello world'
+2011/12/10 00:42:33 post query identified 36972 possible files
+/Users/rsc/pub/linux-3.1.3/Documentation/filesystems/ramfs-rootfs-initramfs.txt: 3
+/Users/rsc/pub/linux-3.1.3/Documentation/java.txt: 1
+/Users/rsc/pub/linux-3.1.3/Documentation/s390/Debugging390.txt: 3
+/Users/rsc/pub/linux-3.1.3/arch/blackfin/kernel/kgdb_test.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/frv/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/mn10300/kernel/gdb-stub.c: 1
+/Users/rsc/pub/linux-3.1.3/arch/powerpc/platforms/powermac/udbg_scc.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/media/video/msp3400-driver.c: 1
+/Users/rsc/pub/linux-3.1.3/drivers/net/sfc/selftest.c: 1
+/Users/rsc/pub/linux-3.1.3/samples/kdb/kdb_hello.c: 2
+1.24u 0.34s 1.59r  # brute force
+$ 
+```
+
+为了尽可能减少I/O，充分利用系统的缓存，csearch会通过调用mmap来映射索引文件到内存，然后直接从系统的文件缓存来读取索引文件内容。这个让csearch，在没有以服务进程的形式出现，在第二次调用csearch，因为缓存的缘故，提供了非常高的性能。
+
+这里的工具的源代码可以在[code.google.com/p/codesearch](https://code.google.com/p/codesearch)看到。这篇文件提到的相关技术，主要是 [index/regexp.go](https://code.google.com/p/codesearch/source/browse/index/regexp.go)(正则查找)，[index/read.go](https://code.google.com/p/codesearch/source/browse/index/read.go) (索引加载)，和 [index/write.go](https://code.google.com/p/codesearch/source/browse/index/write.go) (写索引)。
+
+该代码还在regex / match.go中包含一个仅针对搜索工具调整的基于DFA的自定义匹配引擎。这个引擎唯一有用的是实现grep，但是它的速度非常快。 因为它可以调用标准的Go包来解析正则表达式，并将它们归结为基本操作，所以新的匹配器是500行以下的代码。
+
+
+
+## Histroy
+
+不管是n-grams，还是与它相应的模式匹配方法都不是什么新东西。[Shannon](https://en.wikipedia.org/wiki/Claude_Shannon "又一个信息领域神一般存在的人") 在1948发表的开创新论文_<A Mathematical Theory of Communication>_[[1](https://swtch.com/~rsc/regexp/regexp4.html#1)]已经用它来分析英语文本。甚至有比这个时间点还更古老的线索。Shannon在论文里面引用了 Pratt的1939出版的书 _<Secret and Urgent>_[[2](https://swtch.com/~rsc/regexp/regexp4.html#2)]，可以想象到很有可能Shannon自己很早就已经用n-gram来分析他战时参与的那些加解密相关工作。
+
+Zobel, Moffat, 和 Sacks-Davis 在1993年发表的论文_Searching Large Lexicons for Partially Specified Terms using Compressed Inverted Files_[[3](https://swtch.com/~rsc/regexp/regexp4.html#3)]描述了怎么在一组单词（词典）中使用n-gram的反向索引，将诸如fro * n的模式匹配到与frozen或frogspawn这些单词。Moffat 和Bell 在1994年出版的经典书籍_**Managing Gigabytes**_[[4](https://swtch.com/~rsc/regexp/regexp4.html#4)]总结了类似的方法。还有Zobel 等其他同学的相关论文提到，_**n-grams**_技术可以应用于比只有*通配符更丰富的那些模式匹配语言上，但Zobel的论文里面只演示一个简单的字符类来做具体的例子：
+
+> 注意到 n-grams 可以用来支撑其他的模式匹配。例如，当n==3的时候，给定一个模式序列比如 `ab[cd]e`，其中方括号标示在字符d和字符e之间的字符必须是c或者d，这个时候的模式匹配的是字符串必须是同时包含 abc 和 bce的字符串； 或者是同时包含 abd 和 bde 的字符串。
+
+Zobel的论文里面的描述和我们这里的实作的主要区别是，现在的计算机世界，gigabyte 已经不再被称为大数据量，所以在Zobel里面是在一个单词集合上应用n-gram索引和模式匹配，我们是直接在整个文件集上来应用索引和匹配。前面我们描述的三元组生成规则来分析`ab[cd]e`的话会生成如下的三元查询语句：
+
+```
+(abc AND bce) OR (abd AND bde)
+```
+
+如果实现上，应用更积极的简化转换策略的话，把上面的查询优化成如下：
+
+```
+(abc OR abd) AND (bce OR bde)
+```
+
+会有更小的运行时内存占用。第二个查询语句和第一个从语义上是等价的，但表达不是很精准，所以简化在这里其实是在内存使用量和精确性上做权衡。
+
+
+
+## Summary
+
+通过对每一个文档构建相应的trigrams-index，在大量的这些小文档上，执行正则表达式匹配的运行效率其实是非常高的。这样使用trigrams不是什么新花招，只是对于很多同学来说确实也不是非常普遍认知。
+
+无论正则表达式语法在具体实现版本上[表面看起来有多么复杂](http://code.google.com/p/re2/wiki/Syntax)，从数学语义上都是可以归并到前面我们分析的那集中基本情形(空字符串，但个字符，重复操作，并操作，或操作)。正是由于正则表达式具备这样的基本归并能力，我们可以用非常高效的算法来实现正则表达式，类似本系列里面的[第一篇文章](https://swtch.com/~rsc/regexp/regexp1.html)和[第三篇文章](https://swtch.com/~rsc/regexp/regexp2.html)[articles](https://swtch.com/~rsc/regexp/regexp3.html)描述的。本文前面的分析里面，我们把一个正则表达式进行三元分析，得到相应的三元查询串(是索引匹配器的核心功能)，这个也正是由于正则表达式的这个基本归并能力才可以这么干。
+
+如果你错过了当年Google的Code-Search项目的发布，没有体验过，但你又想用正则表达式来快速搜索你本地的代码，那么可以用[这个命令行](https://code.google.com/p/codesearch/)来试试看是否符合你的要求。
+
+
+
+## Acknowledgements
+
+感谢所有过去五年一起曾经参与过或者支持过Code-Search项目的Google的筒子们。有非常非常多同学，这里就不一一列出了，但缺少整个项目的顺利上线是咱们整个团队合作努力的结果，而且咱们都收获了很多欢乐。
+
+
+
+## References
+
+[1] Claude Shannon, “[A Mathematical Theory of Communication](http://cm.bell-labs.com/cm/ms/what/shannonday/shannon1948.pdf),” *Bell System Technical Journal*, July, October 1948.
+
+[2] Fletcher Pratt, *Secret and Urgent: The Story of Codes and Ciphers*, 1939. Reprinted by Aegean Park Press, 1996.
+
+[3] Justin Zobel, Alistair Moffat, and Ron Sacks-Davis, “[Searching Large Lexicons for Partially Specified Terms using Compressed Inverted Files,](http://www.vldb.org/conf/1993/P290.PDF)” *Proceedings of the 19th VLDB Conference*, 1993.
+
+[4] Ian Witten, Alistair Moffat, and Timothy Bell, *Managing Gigabytes: Compressing and Indexing Documents and Images*, 1994. Second Edition, 1999.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
