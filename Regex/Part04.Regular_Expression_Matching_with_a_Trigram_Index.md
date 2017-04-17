@@ -193,15 +193,36 @@ Pro: {2}        e_S: {1}        ode: {1, 1}     tin: {2}
 
 ## Implementation
 
+为了示范上面提及的想法，我发布了一个用[Go编写的基础版本](http://code.google.com/p/codesearch)。如果你安装了最新的[Go的版本](http://golang.org/)，你可以直接运行：
 
+```
+goinstall code.google.com/p/codesearch/cmd/{cindex,csearch}
+```
 
+来安装相应的二进制命令 cindex 和 csearch。如果你么有安装Go，可以[下载二进制的安装包](https://code.google.com/p/codesearch/downloads/list)，支持FreeBSD, Linux, OpenBSD, OS X, 和 Windows 平台。
 
+首先第一步是运行cindex，cindex接受一个目录的列表或者文件列表作为参数，来建立索引：
 
+```
+cindex /usr/include $HOME/src
+```
 
+默认情况下cindex是把生成的索引加入到现在的索引库里面，所以上面的命令其实等价于如下：
 
+```
+cindex /usr/include
+cindex $HOME/src
+```
 
+在不带参数的情况下，cindex是刷新本地已经存在的索引，所以运行上述命令后，再继续运行：
 
+```
+cindex
+```
 
+会重新扫描 /usr/include 和 $HOME/src ，然后重写相关的索引文件。要找到相关的帮助信息可以运行 `cindex -help`。
+
+[The indexer](https://code.google.com/p/codesearch/source/browse/cmd/cindex/cindex.go)会假定所有处理的文件都是以UTF-8为编码的。对于那些包含无效的UTF-8的文件或者说是行数过大的文件，或者说是拥有的三元语法单元过于庞大的文件，都会被索引处理程序丢弃掉。
 
 
 
