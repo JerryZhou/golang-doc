@@ -1,3 +1,9 @@
+**万物之始，大道至简，衍化至繁**
+
+一直特别欣赏Golang的简洁，简洁之美由里而外，亦发现这种纷繁之后的简更是贯穿在Rob pike的整个职业生涯中：Unix, Inferno, Regex,  UTF8，Golang。
+
+拿Golang的Spec和[C++那个卖133刀的Spec](http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n4296.pdf)坐下对比，就可以深刻理解Golang为什么是下一代系统级语言。
+
 Golang-Reading: 笔记
 ===
 一遍读源码一遍记录，想了解Golang, 必须从历史的源码中去找他的实现。先回到用C实现的版本，再回到自举的版本。
